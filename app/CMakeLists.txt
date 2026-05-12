@@ -1,11 +1,12 @@
-add_executable(hpc_queue_app main.cpp)
+add_executable(TradingEngine_app
+                main.cpp)
 
-target_link_libraries(hpc_queue_app
+target_link_libraries(TradingEngine_app
         PRIVATE
-        hpc_queue
+        TradingEngine
 )
 
-target_compile_features(hpc_queue_app
+target_compile_features(TradingEngine_app
         PRIVATE
         cxx_std_23
 )

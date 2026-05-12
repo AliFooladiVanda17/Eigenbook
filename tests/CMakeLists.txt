@@ -8,15 +8,15 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(googletest)
 
-add_executable(orderbook_tests
-        orderbook_tests.cpp
+add_executable(TradingEngine_tests
+        TradingEngine_tests.cpp
 )
 
-target_link_libraries(orderbook_tests
+target_link_libraries(TradingEngine_tests
         PRIVATE
-        hpc_queue
+        TradingEngine
         GTest::gtest_main
 )
 
 include(GoogleTest)
-gtest_discover_tests(orderbook_tests)
+gtest_discover_tests(TradingEngine_tests)
