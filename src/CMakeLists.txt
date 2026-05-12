@@ -1,16 +1,16 @@
-add_library(hpc_queue STATIC)
+add_library(orderbook STATIC)
 
 target_sources(hpc_queue
 
         PRIVATE
-            hpcqueue.cpp
+        hpcqueue.cpp
 
         PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${PROJECT_SOURCE_DIR}/include
 
         FILES
-            ${PROJECT_SOURCE_DIR}/include/hpcqueue/hpcqueue.h
+        ${PROJECT_SOURCE_DIR}/include/hpcqueue/hpcqueue.h
 )
 
 target_include_directories(hpc_queue

@@ -1,0 +1,230 @@
+# =========================================================
+  # ClangFormat Configuration
+  # Optimized for:
+  # - C++23
+  # - Systems / HFT-style development
+  # - LLVM-inspired consistency
+  # - Readability + predictable formatting
+  # =========================================================
+
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# =========================================================
+# General Formatting
+# =========================================================
+
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+ColumnLimit: 100
+
+IndentCaseBlocks: true
+IndentGotoLabels: false
+
+AccessModifierOffset: -4
+
+# =========================================================
+# Braces
+# =========================================================
+
+BreakBeforeBraces: Attach
+
+BraceWrapping:
+  AfterClass: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeCatch: true
+  BeforeElse: true
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+
+# =========================================================
+# Pointers / References
+# =========================================================
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# =========================================================
+# Spaces
+# =========================================================
+
+SpaceBeforeParens: ControlStatements
+SpaceBeforeCpp11BracedList: false
+
+SpaceInEmptyParentheses: false
+SpacesInAngles: false
+SpacesInContainerLiterals: false
+SpacesInCStyleCastParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+Cpp11BracedListStyle: true
+
+# =========================================================
+# Alignment
+# =========================================================
+
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignEscapedNewlines: Left
+AlignTrailingComments: true
+
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignConsecutiveMacros: false
+
+# =========================================================
+# Includes
+# =========================================================
+
+SortIncludes: true
+IncludeBlocks: Regroup
+
+IncludeCategories:
+  - Regex: '^<.*>'
+    Priority: 1
+
+  - Regex: '^".*"'
+    Priority: 2
+
+# =========================================================
+# Functions / Calls
+# =========================================================
+
+BinPackParameters: false
+BinPackArguments: false
+
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+AlwaysBreakTemplateDeclarations: Yes
+
+PenaltyBreakBeforeFirstCallParameter: 20
+
+# =========================================================
+# Constructor Initializers
+# =========================================================
+
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: NextLine
+
+ConstructorInitializerIndentWidth: 4
+
+# =========================================================
+# Templates / Concepts
+# =========================================================
+
+BreakTemplateDeclarations: Yes
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
+
+# =========================================================
+# Lambdas
+# =========================================================
+
+AllowShortLambdasOnASingleLine: Inline
+
+# =========================================================
+# Namespaces
+# =========================================================
+
+CompactNamespaces: false
+FixNamespaceComments: true
+NamespaceIndentation: None
+
+# =========================================================
+# Comments
+# =========================================================
+
+ReflowComments: true
+CommentPragmas: '^ IWYU pragma:'
+
+# =========================================================
+# Empty Lines
+# =========================================================
+
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+# =========================================================
+# Preprocessor
+# =========================================================
+
+IndentPPDirectives: None
+
+# =========================================================
+# Switch Statements
+# =========================================================
+
+IndentCaseLabels: true
+
+# =========================================================
+# Line Breaking Penalties
+# =========================================================
+
+PenaltyBreakAssignment: 25
+PenaltyBreakComment: 10
+PenaltyBreakString: 50
+PenaltyExcessCharacter: 100
+PenaltyReturnTypeOnItsOwnLine: 60
+
+# =========================================================
+# Modern C++ Preferences
+# =========================================================
+
+QualifierAlignment: Left
+
+SeparateDefinitionBlocks: Always
+
+# =========================================================
+# Macros
+# =========================================================
+
+StatementMacros:
+  - Q_UNUSED
+  - QT_REQUIRE_VERSION
+
+# =========================================================
+# Raw Strings
+# =========================================================
+
+RawStringFormats:
+  - Language: TextProto
+    Delimiters:
+      - pb
+      - proto
+    BasedOnStyle: google
+
+# =========================================================
+# Experimental / Readability
+# =========================================================
+
+EmptyLineBeforeAccessModifier: LogicalBlock
+
+# =========================================================
+# Disable overly aggressive behavior
+# =========================================================
+
+InsertTrailingCommas: None
+
+# =========================================================
+# End
+  # =========================================================

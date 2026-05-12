@@ -8,15 +8,15 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(googletest)
 
-add_executable(hpc_queue_tests
-        hpc_queue_tests.cpp
+add_executable(orderbook_tests
+        orderbook_tests.cpp
 )
 
-target_link_libraries(hpc_queue_tests
+target_link_libraries(orderbook_tests
         PRIVATE
         hpc_queue
         GTest::gtest_main
 )
 
 include(GoogleTest)
-gtest_discover_tests(hpc_queue_tests)
+gtest_discover_tests(orderbook_tests)
