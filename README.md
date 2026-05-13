@@ -142,7 +142,7 @@ Concurrency is handled at the boundaries:
 ---
 
 ## Benchmarks
-
+Benchmarks will be added as the project gets mature.
 
 ---
 
@@ -238,11 +238,6 @@ Current focus:
 - shard ownership model
 - benchmark scaffolding
 - latency-oriented implementation choices
-
----
-
-## License
-
 
 ---
 
