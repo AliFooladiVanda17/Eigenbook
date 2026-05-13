@@ -4,14 +4,11 @@
 
 #include "tradingengine/PriceLevel.h"
 
-void PriceLevel::addOrder(const Order& order) {
+PriceLevel::Iter PriceLevel::addOrder(const Order& order) {
     totalQuantity += order.getQuantity();
     orders.push_back(order);
-}
 
-void PriceLevel::addOrder(Order&& order) {
-    totalQuantity += order.getQuantity();
-    orders.push_back(std::move(order));
+    return std::prev(orders.end());
 }
 
 void PriceLevel::removeFrontOrder() {
@@ -39,4 +36,13 @@ std::size_t PriceLevel::orderCount() const noexcept {
 
 unsigned long PriceLevel::quantity() const noexcept {
     return totalQuantity;
+}
+
+void PriceLevel::removeAt(const PriceLevel::Iter iter) {
+
+    if(iter == orders.end()) return;
+    auto order = *iter;
+    totalQuantity -= order.getQuantity();
+
+    orders.erase(iter);
 }

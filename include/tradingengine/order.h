@@ -15,53 +15,40 @@ private:
     unsigned long price;
     unsigned long quantity;
 
+    unsigned long id;
+
 public:
-    // Copy constructor
+
+    Order() = default;
+    // Copy
     Order(const Order& other) = default;
+    Order& operator=(const Order& other) = default;
 
-    // Copy assignment
-    Order& operator=(const Order& other) {
-        if (this == &other)
-            return *this;
-
-        type = other.type;
-        side = other.side;
-        price = other.price;
-        quantity = other.quantity;
-
-        return *this;
-    }
-
-    // Move constructor
-    Order(Order&& other) noexcept
-        : type(other.type), side(other.side), price(other.price), quantity(other.quantity) {}
-
-    // Move assignment
-    Order& operator=(Order&& other) noexcept {
-        if (this == &other)
-            return *this;
-
-        type = other.type;
-        side = other.side;
-        price = other.price;
-        quantity = other.quantity;
-
-        return *this;
-    }
+    // Move
+    Order(Order&& other) noexcept = default;
+    Order& operator=(Order&& other) =default;
 
     ~Order() = default;
 
     [[nodiscard]] OrderType getType() const { return type; }
+
     void setType(OrderType Type) { type = Type; }
 
     [[nodiscard]] OrderSide getSide() const { return side; }
+
     void setSide(OrderSide Side) { side = Side; }
 
     [[nodiscard]] unsigned long getPrice() const { return price; }
+
     void setPrice(unsigned long Price) { price = Price; }
 
     [[nodiscard]] unsigned long getQuantity() const { return quantity; }
+
     void setQuantity(unsigned long Quantity) { quantity = Quantity; }
+
+    [[nodiscard]] unsigned long getId() const { return id; }
+
+    void setId(unsigned long Id) { id = Id; }
 };
 
 #endif // HPC_QUEUE_SRC_ORDER_H

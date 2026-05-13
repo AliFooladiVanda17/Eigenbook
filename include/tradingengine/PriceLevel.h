@@ -5,30 +5,40 @@
 #ifndef HPC_QUEUE_SRC_BOOK_PRICELEVEL_H
 #define HPC_QUEUE_SRC_BOOK_PRICELEVEL_H
 
-#include <deque>
+#include <list>
 #include <tradingengine/order.h>
 
 class PriceLevel {
 public:
-  using OrderList = std::deque<Order>;
+    using OrderList = std::list<Order>;
+    using Iter = std::list<Order>::iterator;
 
-  void addOrder(const Order& order);
-  void addOrder(Order&& order);
+    Iter addOrder(const Order& order);
 
-  void removeFrontOrder();
+    void removeFrontOrder();
 
-  Order& frontOrder();
-  const Order& frontOrder() const;
+    Order& frontOrder();
+    [[nodiscard]] const Order& frontOrder() const;
 
-  bool empty() const noexcept;
+    [[nodiscard]] bool empty() const noexcept;
 
-  std::size_t orderCount() const noexcept;
+    [[nodiscard]] std::size_t orderCount() const noexcept;
 
-  unsigned long quantity() const noexcept;
+    [[nodiscard]] unsigned long quantity() const noexcept;
+
+    void removeAt(Iter);
+
+    PriceLevel() = default;
+
+    PriceLevel(const PriceLevel& newLevel) = default;
+    PriceLevel& operator=(const PriceLevel& newLevel) = default;
+
+    PriceLevel(PriceLevel&& newLevel) noexcept = default;
+    PriceLevel& operator=(PriceLevel&& newLevel) noexcept = default;
 
 private:
-  OrderList orders;
-  unsigned long totalQuantity {0};
+    OrderList orders;
+    unsigned long totalQuantity{0};
 };
 
 #endif // HPC_QUEUE_SRC_BOOK_PRICELEVEL_H
