@@ -152,9 +152,9 @@ Benchmarks will be added as the project gets mature.
 
 - [ ] `InstrumentId`
 - [ ]  `ShardId`
-- [-]  `OrderId`
-- [-]  `Price`
-- [-]  `OrderNode`
+- [x]  `OrderId`
+- [x]  `Price`
+- [x]  `OrderNode`
 - [ ]  basic `OrderBook`
 
 ### Phase 2 — Routing
