@@ -13,12 +13,15 @@
 
 template<typename C>
 concept PriceCompare =
-std::same_as<C, std::less<unsigned long>> ||
-std::same_as<C, std::greater<unsigned long>>;
+std::same_as<C, std::less<Price>> ||
+std::same_as<C, std::greater<Price>>;
 
-template<typename PriceCompare = std::less<unsigned long>>
+template<typename PriceCompare = std::less<Price>>
 class PriceLadder {
 public:
+
+    using IterOrder = std::list<Order>::iterator;
+    using IterPrice = std::map<Price, PriceLevel, PriceCompare>::iterator;
 
     PriceLadder() = default;
 
@@ -40,22 +43,22 @@ public:
 
     void clear();
 
-    void addOrder(Price iPrice, const Order &order);
+    void addOrder(const Order &order);
 
-    void cancelOrder(Price iPrice, OrderId iId);
+    void cancelOrder(OrderId iId);
 
-    void modifyOrder(Price iPrice, OrderId iId, const Order &updated);
+    void modifyOrder(OrderId iId, const Order &updated);
 
     [[nodiscard]] const PriceLevel *getLevel(Price iPrice) const;
 
     template<typename Callback>
     void forEachLevel(Callback &&cb) const;
 
-    [[nodiscard]] std::map<Price, PriceLevel>::iterator bestPriceIter() const;
+    [[nodiscard]] IterPrice bestPriceIter() const;
 
     [[nodiscard]] Price bestPrice() const;
 
-    [[nodiscard]] std::map<Price, PriceLevel>::iterator worstPriceIter() const;
+    [[nodiscard]] IterPrice worstPriceIter() const;
 
     [[nodiscard]] Price worstPrice() const;
 
@@ -74,7 +77,13 @@ public:
     void dump() const;
 
 private:
-    using Iter = std::list<Order>::iterator;
+
+    struct OrderLocation{
+        Price price{0};
+
+        IterPrice priceIterator;
+        IterOrder orderIterator;
+    };
 
     const OrderSide direction =
             std::is_same_v<PriceCompare, std::less<Price>>
@@ -82,15 +91,10 @@ private:
             : OrderSide::BUY;
 
     std::map<Price, PriceLevel, PriceCompare> levels;
-    std::unordered_map<OrderId, std::pair<Price, Iter>> index;
+    std::unordered_map<OrderId, OrderLocation> index;
 
 };
 
-template<typename PriceCompare>
-bool PriceLadder<PriceCompare>::crossedPrice(Order incoming, Order resting) {
-    return direction == OrderSide::BUY ?
-           resting.getPrice() < incoming.getPrice() :
-           resting.getPrice() > incoming.getPrice();
-}
+
 
 #endif // HPC_QUEUE_SRC_BOOK_PRICELADDER_H

@@ -18,14 +18,6 @@ void PriceLevel::removeFrontOrder() {
     orders.pop_front();
 }
 
-Order& PriceLevel::frontOrder() {
-    return orders.front();
-}
-
-const Order& PriceLevel::frontOrder() const {
-    return orders.front();
-}
-
 bool PriceLevel::empty() const noexcept {
     return orders.empty();
 }

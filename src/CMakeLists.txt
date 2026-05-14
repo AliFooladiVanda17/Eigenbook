@@ -3,8 +3,8 @@ add_library(TradingEngine STATIC
         ../include/tradingengine/types.h
         book/order.cpp
         ../include/tradingengine/order.h
-        book/orderbook.cpp
-        ../include/tradingengine/orderbook.h
+        book/OrderBook.cpp
+        ../include/tradingengine/OrderBook.h
         book/PriceLadder.cpp
         ../include/tradingengine/PriceLadder.h
         book/PriceLevel.cpp

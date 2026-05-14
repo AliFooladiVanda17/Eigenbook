@@ -215,7 +215,7 @@ cmake --build build -j
 ### Run
 
 ```
-./build/orderbook
+./build/OrderBook
 ```
 
 ---

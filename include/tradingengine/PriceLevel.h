@@ -17,8 +17,9 @@ public:
 
     void removeFrontOrder();
 
-    Order& frontOrder();
-    [[nodiscard]] const Order& frontOrder() const;
+    decltype(auto) frontOrder(this auto&& self) {
+        return self.orders.front();
+    }
 
     [[nodiscard]] bool empty() const noexcept;
 
