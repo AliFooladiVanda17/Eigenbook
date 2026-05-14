@@ -11,70 +11,86 @@
 #include <tradingengine/PriceLevel.h>
 #include <tradingengine/order.h>
 
-template <typename C>
+template<typename C>
 concept PriceCompare =
 std::same_as<C, std::less<unsigned long>> ||
-    std::same_as<C, std::greater<unsigned long>>;
+std::same_as<C, std::greater<unsigned long>>;
 
-template <typename PriceCompare = std::less<unsigned long>>
+template<typename PriceCompare = std::less<unsigned long>>
 class PriceLadder {
-private:
-    using Iter = std::list<Order>::iterator;
-
-    OrderSide direction;
-
-    std::map<unsigned long, PriceLevel, PriceCompare> levels;
-    std::unordered_map<unsigned int, std::pair<unsigned long, Iter>> index;
-
 public:
 
     PriceLadder() = default;
+
     ~PriceLadder() = default;
 
-    PriceLadder(const PriceLadder&) = default;
-    PriceLadder& operator=(const PriceLadder&) = default;
+    PriceLadder(const PriceLadder &) = default;
 
-    PriceLadder& operator=(PriceLadder&&) noexcept = default;
-    PriceLadder(PriceLadder&&) noexcept = default;
+    PriceLadder &operator=(const PriceLadder &) = default;
 
-    PriceLevel& getOrCreateLevel(unsigned long price);
+    PriceLadder &operator=(PriceLadder &&) noexcept = default;
 
-    bool hasLevel(unsigned long price) const;
+    PriceLadder(PriceLadder &&) noexcept = default;
 
-    void removeLevel(unsigned long price);
+    PriceLevel &getOrCreateLevel(Price iPrice);
+
+    bool hasLevel(Price iPrice) const;
+
+    void removeLevel(Price iPrice);
 
     void clear();
 
-    void addOrder(unsigned long price, const Order& order);
+    void addOrder(Price iPrice, const Order &order);
 
-    void cancelOrder(unsigned long price, unsigned int id);
+    void cancelOrder(Price iPrice, OrderId iId);
 
-    void modifyOrder(unsigned long price, unsigned int id, const Order& updated);
+    void modifyOrder(Price iPrice, OrderId iId, const Order &updated);
 
-    [[nodiscard]] const PriceLevel* getLevel(unsigned long price) const;
+    [[nodiscard]] const PriceLevel *getLevel(Price iPrice) const;
 
-    template <typename Callback>
-    void forEachLevel(Callback&& cb) const;
+    template<typename Callback>
+    void forEachLevel(Callback &&cb) const;
 
-    [[nodiscard]] unsigned long bestPrice() const;
+    [[nodiscard]] std::map<Price, PriceLevel>::iterator bestPriceIter() const;
 
-    [[nodiscard]] unsigned long worstPrice() const;
+    [[nodiscard]] Price bestPrice() const;
 
-    [[nodiscard]] unsigned long bestAsk() const { return levels.begin()->first; }
+    [[nodiscard]] std::map<Price, PriceLevel>::iterator worstPriceIter() const;
 
-    [[nodiscard]] unsigned long bestBid() const { return levels.rbegin()->first; }
+    [[nodiscard]] Price worstPrice() const;
 
-    void matchAgainst(PriceLadder& opposite, Order& incoming);
+    void matchAgainst(PriceLadder &opposite, Order &incoming);
 
     [[nodiscard]] size_t totalOrders() const;
 
     [[nodiscard]] size_t totalVolume() const;
+
+    [[nodiscard]] bool crossedPrice(Order ord1, Order ord2);
 
     bool empty() const;
 
     void print() const;
 
     void dump() const;
+
+private:
+    using Iter = std::list<Order>::iterator;
+
+    const OrderSide direction =
+            std::is_same_v<PriceCompare, std::less<Price>>
+            ? OrderSide::SELL
+            : OrderSide::BUY;
+
+    std::map<Price, PriceLevel, PriceCompare> levels;
+    std::unordered_map<OrderId, std::pair<Price, Iter>> index;
+
 };
+
+template<typename PriceCompare>
+bool PriceLadder<PriceCompare>::crossedPrice(Order incoming, Order resting) {
+    return direction == OrderSide::BUY ?
+           resting.getPrice() < incoming.getPrice() :
+           resting.getPrice() > incoming.getPrice();
+}
 
 #endif // HPC_QUEUE_SRC_BOOK_PRICELADDER_H

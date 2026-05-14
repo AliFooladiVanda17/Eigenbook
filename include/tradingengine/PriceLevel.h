@@ -24,9 +24,9 @@ public:
 
     [[nodiscard]] std::size_t orderCount() const noexcept;
 
-    [[nodiscard]] unsigned long quantity() const noexcept;
+    [[nodiscard]] Quantity quantity() const noexcept;
 
-    void removeAt(Iter);
+    void removeAt(const Iter&);
 
     PriceLevel() = default;
 
@@ -38,7 +38,7 @@ public:
 
 private:
     OrderList orders;
-    unsigned long totalQuantity{0};
+    Quantity totalQuantity{0};
 };
 
 #endif // HPC_QUEUE_SRC_BOOK_PRICELEVEL_H

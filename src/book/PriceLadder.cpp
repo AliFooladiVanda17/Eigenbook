@@ -4,104 +4,147 @@
 
 #include "tradingengine/PriceLadder.h"
 
-template <typename PriceCompare>
-PriceLevel& PriceLadder<PriceCompare>::getOrCreateLevel(unsigned long price) {
-    return levels[price];
+template<typename PriceCompare>
+PriceLevel &PriceLadder<PriceCompare>::getOrCreateLevel(Price iPrice) {
+    return levels[iPrice];
 }
 
-template <typename PriceCompare>
-bool PriceLadder<PriceCompare>::hasLevel(unsigned long price) const {
-    return levels.contains(price);
+template<typename PriceCompare>
+bool PriceLadder<PriceCompare>::hasLevel(Price iPrice) const {
+    return levels.contains(iPrice);
 }
 
-template <typename PriceCompare>
-void PriceLadder<PriceCompare>::removeLevel(unsigned long price) {
-    if (hasLevel(price)) {
-        levels.erase(price);
+template<typename PriceCompare>
+void PriceLadder<PriceCompare>::removeLevel(Price iPrice) {
+    if (hasLevel(iPrice)) {
+        levels.erase(iPrice);
     }
 }
 
-template <typename PriceCompare>
+template<typename PriceCompare>
 void PriceLadder<PriceCompare>::clear() {
     levels.clear();
 }
 
-template <typename PriceCompare>
-void PriceLadder<PriceCompare>::addOrder(unsigned long price, const Order& order) {
-    PriceLevel& orders = getOrCreateLevel(price);
+template<typename PriceCompare>
+void PriceLadder<PriceCompare>::addOrder(Price iPrice, const Order &order) {
+    PriceLevel &orders = getOrCreateLevel(iPrice);
 
     auto it = orders.addOrder(order);
 
-    index[order.getId()] = {price, it};
+    index[order.getId()] = {iPrice, it};
 }
 
-template <typename PriceCompare>
-void PriceLadder<PriceCompare>::cancelOrder(unsigned long price, unsigned int id) {
-    PriceLevel& orders = getOrCreateLevel(price);
-    const auto& [indexPrice, indexIter] = index[id];
+template<typename PriceCompare>
+void PriceLadder<PriceCompare>::cancelOrder(Price iPrice, OrderId iId) {
+    PriceLevel &orders = getOrCreateLevel(iPrice);
+    const auto &[indexPrice, indexIter] = index[iId];
 
-    index.erase(id);
+    index.erase(iId);
     orders.removeAt(indexIter);
 }
 
-template <typename PriceCompare>
-void PriceLadder<PriceCompare>::modifyOrder(unsigned long price,
-                                            unsigned int id,
-                                            const Order& updated) {
-    cancelOrder(price, id);
+template<typename PriceCompare>
+void PriceLadder<PriceCompare>::modifyOrder(Price iPrice,
+                                            OrderId iId,
+                                            const Order &updated) {
+    cancelOrder(iPrice, iId);
 
     addOrder(updated.getPrice(), updated);
 }
 
-template <typename PriceCompare>
-const PriceLevel* PriceLadder<PriceCompare>::getLevel(unsigned long price) const {
-    auto it = levels.find(price);
+template<typename PriceCompare>
+const PriceLevel *PriceLadder<PriceCompare>::getLevel(Price iPrice) const {
+    auto it = levels.find(iPrice);
 
     return (it == levels.end()) ? nullptr : &(it->second);
 }
 
-template <typename PriceCompare>
-unsigned long PriceLadder<PriceCompare>::bestPrice() const {
+template<typename PriceCompare>
+std::map<Price, PriceLevel>::iterator PriceLadder<PriceCompare>::bestPriceIter() const {
     if (!levels.empty()) {
-        auto& [price, level] = *levels.begin();
-        return price;
+        return levels.begin();
     }
-    return -1;
+    return levels.end();
 }
 
-template <typename PriceCompare>
-unsigned long PriceLadder<PriceCompare>::worstPrice() const {
+template<typename PriceCompare>
+Price PriceLadder<PriceCompare>::bestPrice() const {
     if (!levels.empty()) {
-        auto& [price, level]= levels.rbegin();
+        auto &[price, level] = *levels.begin();
         return price;
     }
-    return -1;
+    return {-1};
 }
 
-template <typename PriceCompare>
-void PriceLadder<PriceCompare>::matchAgainst(PriceLadder& opposite, Order& incoming) {}
+template<typename PriceCompare>
+std::map<Price, PriceLevel>::iterator PriceLadder<PriceCompare>::worstPriceIter() const {
+    if (!levels.empty()) {
+        return levels.rbegin();
+    }
+    return levels.end();
+}
 
-template <typename PriceCompare>
+template<typename PriceCompare>
+Price PriceLadder<PriceCompare>::worstPrice() const {
+    if (!levels.empty()) {
+        auto &[price, level] = levels.rbegin();
+        return price;
+    }
+    return {-1};
+}
+
+template<typename PriceCompare>
+void PriceLadder<PriceCompare>::matchAgainst(PriceLadder &otherSide, Order &incoming) {
+    auto bPriceIter = bestPriceIter();
+
+    while (bPriceIter != levels.end() && !incoming.isFilled()) {
+        auto& orders = bPriceIter->second;
+
+        auto& resting = orders.frontOrder();
+
+        if(crossedPrice(incoming, resting)) break;
+
+        Quantity traded =
+                std::min(incoming.getQuantity(),
+                         resting.getQuantity());
+
+        incoming.subtract(traded);
+        resting.subtract(traded);
+
+        if (resting.isFilled()) {
+            orders.removeFrontOrder();
+        }
+
+        if (orders.empty()) {
+            bPriceIter = levels.erase(bPriceIter);
+        }
+    }
+
+    if(!incoming.isFilled()) otherSide.addOrder(incoming);
+}
+
+template<typename PriceCompare>
 size_t PriceLadder<PriceCompare>::totalOrders() const {
     return 0;
 }
 
-template <typename PriceCompare>
+template<typename PriceCompare>
 size_t PriceLadder<PriceCompare>::totalVolume() const {
     return 0;
 }
 
-template <typename PriceCompare>
+template<typename PriceCompare>
 bool PriceLadder<PriceCompare>::empty() const {
     return levels.empty();
 }
 
-template <typename PriceCompare>
+template<typename PriceCompare>
 void PriceLadder<PriceCompare>::print() const {}
 
-template <typename PriceCompare>
+template<typename PriceCompare>
 void PriceLadder<PriceCompare>::dump() const {}
 
-template <typename PriceCompare>
-template <typename Callback>
-void PriceLadder<PriceCompare>::forEachLevel(Callback&& cb) const {}
+template<typename PriceCompare>
+template<typename Callback>
+void PriceLadder<PriceCompare>::forEachLevel([[maybe_unused]] Callback &&cb) const {}

@@ -34,11 +34,11 @@ std::size_t PriceLevel::orderCount() const noexcept {
     return orders.size();
 }
 
-unsigned long PriceLevel::quantity() const noexcept {
+Quantity PriceLevel::quantity() const noexcept {
     return totalQuantity;
 }
 
-void PriceLevel::removeAt(const PriceLevel::Iter iter) {
+void PriceLevel::removeAt(const PriceLevel::Iter& iter) {
 
     if(iter == orders.end()) return;
     auto order = *iter;

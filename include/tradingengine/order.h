@@ -5,17 +5,23 @@
 #ifndef HPC_QUEUE_SRC_ORDER_H
 #define HPC_QUEUE_SRC_ORDER_H
 
+#include<expected>
 #include <tradingengine/types.h>
+
+enum class returnCodes{
+    NOT_ENOUGH_QUANTITY = -2,
+};
+
 
 class Order {
 private:
     OrderType type;
     OrderSide side;
 
-    unsigned long price;
-    unsigned long quantity;
+    Price price;
+    Quantity quantity;
 
-    unsigned long id;
+    OrderId id;
 
 public:
 
@@ -38,17 +44,21 @@ public:
 
     void setSide(OrderSide Side) { side = Side; }
 
-    [[nodiscard]] unsigned long getPrice() const { return price; }
+    [[nodiscard]] Price getPrice() const { return price; }
 
-    void setPrice(unsigned long Price) { price = Price; }
+    void setPrice(Price iPrice) { price = iPrice; }
 
-    [[nodiscard]] unsigned long getQuantity() const { return quantity; }
+    [[nodiscard]] Quantity getQuantity() const { return quantity; }
 
-    void setQuantity(unsigned long Quantity) { quantity = Quantity; }
+    void setQuantity(Quantity iQuantity) { quantity = iQuantity; }
 
-    [[nodiscard]] unsigned long getId() const { return id; }
+    [[nodiscard]] OrderId getId() const { return id; }
 
-    void setId(unsigned long Id) { id = Id; }
+    void setId(OrderId iId) { id = iId; }
+
+    Quantity subtract(Quantity decQuantity);
+
+    [[nodiscard]] bool isFilled()const {return (quantity.value == 0);}
 };
 
 #endif // HPC_QUEUE_SRC_ORDER_H
