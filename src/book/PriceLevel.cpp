@@ -4,7 +4,7 @@
 
 #include "tradingengine/PriceLevel.h"
 
-PriceLevel::Iter PriceLevel::addOrder(const Order& order) {
+PriceLevel::IterOrder PriceLevel::addOrder(const Order &order) {
     totalQuantity += order.getQuantity();
     orders.push_back(order);
 
@@ -30,11 +30,15 @@ Quantity PriceLevel::quantity() const noexcept {
     return totalQuantity;
 }
 
-void PriceLevel::removeAt(const PriceLevel::Iter& iter) {
+void PriceLevel::removeAt(const PriceLevel::IterOrder &iter) {
 
-    if(iter == orders.end()) return;
+    if (iter == orders.end()) return;
     auto order = *iter;
     totalQuantity -= order.getQuantity();
 
     orders.erase(iter);
+}
+
+void PriceLevel::updateOrder(PriceLevel::IterOrder &iter, const Order &order) {
+    if (iter != orders.end()) *iter = order;
 }

@@ -11,9 +11,11 @@
 class PriceLevel {
 public:
     using OrderList = std::list<Order>;
-    using Iter = std::list<Order>::iterator;
+    using IterOrder = std::list<Order>::iterator;
 
-    Iter addOrder(const Order& order);
+    IterOrder addOrder(const Order& order);
+
+    void updateOrder(PriceLevel::IterOrder& iter, const Order& order);
 
     void removeFrontOrder();
 
@@ -27,7 +29,7 @@ public:
 
     [[nodiscard]] Quantity quantity() const noexcept;
 
-    void removeAt(const Iter&);
+    void removeAt(const IterOrder&);
 
     PriceLevel() = default;
 

@@ -48,9 +48,22 @@ void PriceLadder<PriceCompare>::cancelOrder(OrderId iId) {
 
 template<typename PriceCompare>
 void PriceLadder<PriceCompare>::modifyOrder(OrderId iId, const Order &updated) {
-    cancelOrder(iId);
 
-    addOrder(updated);
+    if(index.find(iId) == index.end()) return;
+
+    auto orderLoc = index[iId];
+
+    auto& orderIter = static_cast<OrderLocation>(orderLoc).orderIterator;
+    auto& priceIter = static_cast<OrderLocation>(orderLoc).priceIterator;
+
+    if(orderIter->getQuantity() < updated.getQuantity() ||
+    orderIter->getPrice() != updated.getPrice() ||
+    orderIter->getSide() != updated.getSide()){
+        cancelOrder(iId);
+        addOrder(updated);
+    }else{
+        priceIter->second.updateOrder(iId, updated);
+    }
 }
 
 template<typename PriceCompare>

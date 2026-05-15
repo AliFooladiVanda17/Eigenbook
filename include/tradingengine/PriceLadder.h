@@ -20,8 +20,9 @@ template<typename PriceCompare = std::less<Price>>
 class PriceLadder {
 public:
 
-    using IterOrder = std::list<Order>::iterator;
     using IterPrice = std::map<Price, PriceLevel, PriceCompare>::iterator;
+
+    using IterOrder = PriceLevel::IterOrder;
 
     PriceLadder() = default;
 
@@ -78,11 +79,11 @@ public:
 
 private:
 
-    struct OrderLocation{
+    struct OrderLocation {
         Price price{0};
 
         IterPrice priceIterator;
-        IterOrder orderIterator;
+        IterOrder  orderIterator;
     };
 
     const OrderSide direction =
@@ -94,7 +95,6 @@ private:
     std::unordered_map<OrderId, OrderLocation> index;
 
 };
-
 
 
 #endif // HPC_QUEUE_SRC_BOOK_PRICELADDER_H
