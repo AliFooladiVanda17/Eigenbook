@@ -4,7 +4,7 @@
 
 #ifndef HPC_QUEUE_INCLUDE_TRADINGENGINE_TYPES_H
 #define HPC_QUEUE_INCLUDE_TRADINGENGINE_TYPES_H
-
+#include <chrono>
 // Type safety for Price
 struct Price {
     std::int64_t value;
@@ -62,9 +62,9 @@ struct std::hash<OrderId> {
 
 // Type safety for Timestamp
 struct Timestamp {
-    std::uint64_t value;
+    std::chrono::time_point<std::chrono::steady_clock> value;
 
-    auto operator<=>(const Timestamp &) const = default;
+    auto operator<=>(const Timestamp&) const = default;
 };
 
 enum class OrderSide {

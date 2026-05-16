@@ -120,7 +120,7 @@ Pros:
 Each price level contains:
 
 - a price,
-- aggregate quantity,
+- aggregate remainingQty,
 - head/tail pointers,
 - an intrusive doubly linked list of orders.
 

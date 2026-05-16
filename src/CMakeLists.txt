@@ -1,3 +1,5 @@
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
+
 add_library(TradingEngine STATIC
         engine/TradingEngine.cpp
         ../include/tradingengine/types.h
@@ -42,4 +44,8 @@ install(EXPORT TradingEngineTargets
         FILE TradingEngineTargets.cmake
         NAMESPACE TradingEngine::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/TradingEngine
+)
+
+target_compile_options(TradingEngine PRIVATE
+        $<$<CONFIG:Debug>:-O0 -g3>
 )

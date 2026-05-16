@@ -1,7 +1,7 @@
 //
 // Created by afouladi on 5/12/2026.
 //
-
+#include <iostream>
 #include "tradingengine/PriceLadder.h"
 
 template<typename PriceCompare>
@@ -28,11 +28,11 @@ void PriceLadder<PriceCompare>::clear() {
 
 template<typename PriceCompare>
 void PriceLadder<PriceCompare>::addOrder(const Order &order) {
-    PriceLevel &orders = getOrCreateLevel(order.getPrice());
-    auto priceIter = levels.find(order.getPrice());
+    PriceLevel &orders = getOrCreateLevel(order.price());
+    auto priceIter = levels.find(order.price());
     auto orderIter = orders.addOrder(order);
 
-    index[order.getId()] = {order.getPrice(), priceIter, orderIter};
+    index[order.id()] = {order.price(), priceIter, orderIter};
 }
 
 template<typename PriceCompare>
@@ -49,20 +49,20 @@ void PriceLadder<PriceCompare>::cancelOrder(OrderId iId) {
 template<typename PriceCompare>
 void PriceLadder<PriceCompare>::modifyOrder(OrderId iId, const Order &updated) {
 
-    if(index.find(iId) == index.end()) return;
+    if (index.find(iId) == index.end()) return;
 
     auto orderLoc = index[iId];
 
-    auto& orderIter = static_cast<OrderLocation>(orderLoc).orderIterator;
-    auto& priceIter = static_cast<OrderLocation>(orderLoc).priceIterator;
+    auto &orderIter = static_cast<OrderLocation>(orderLoc).orderIterator;
+    auto &priceIter = static_cast<OrderLocation>(orderLoc).priceIterator;
 
-    if(orderIter->getQuantity() < updated.getQuantity() ||
-    orderIter->getPrice() != updated.getPrice() ||
-    orderIter->getSide() != updated.getSide()){
+    if (orderIter->original() > updated.original()) {
+        priceIter->second.updateOrder(iId, updated);
+
+    } else {
+
         cancelOrder(iId);
         addOrder(updated);
-    }else{
-        priceIter->second.updateOrder(iId, updated);
     }
 }
 
@@ -119,11 +119,11 @@ void PriceLadder<PriceCompare>::matchAgainst(PriceLadder &otherSide, Order &inco
         if (crossedPrice(incoming, resting)) break;
 
         Quantity traded =
-                std::min(incoming.getQuantity(),
-                         resting.getQuantity());
+                std::min(incoming.remaining(),
+                         resting.remaining());
 
-        incoming.subtract(traded);
-        resting.subtract(traded);
+        incoming.fill(traded);
+        resting.fill(traded);
 
         if (resting.isFilled()) {
             orders.removeFrontOrder();
@@ -153,7 +153,35 @@ bool PriceLadder<PriceCompare>::empty() const {
 }
 
 template<typename PriceCompare>
-void PriceLadder<PriceCompare>::print() const {}
+void PriceLadder<PriceCompare>::print() const {
+    std::cout << "================ PRICE LADDER ================\n";
+
+    for (const auto &[price, level]: levels) {
+        std::cout << "Price: " << price << " | Orders: ";
+
+        size_t levelQty = 0;
+        size_t count = 0;
+
+        for (const auto &order: level.orders)   // adjust if needed
+        {
+            std::cout << "[ID: " << order.getId()
+                      << " Qty: " << order.getQuantity() << "] ";
+
+            levelQty += order.getQuantity().value;
+            ++count;
+        }
+
+        std::cout << " | Count: " << count
+                  << " | TotalQty: " << levelQty
+                  << "\n";
+    }
+
+    std::cout << "---------------------------------------------\n";
+    std::cout << "Total Orders: " << totalOrders()
+              << " | Total Volume: " << totalVolume()
+              << "\n";
+    std::cout << "=============================================\n";
+}
 
 template<typename PriceCompare>
 void PriceLadder<PriceCompare>::dump() const {}
@@ -166,6 +194,6 @@ void PriceLadder<PriceCompare>::forEachLevel([[maybe_unused]] Callback &&cb) con
 template<typename PriceCompare>
 bool PriceLadder<PriceCompare>::crossedPrice(Order incoming, Order resting) {
     return direction == OrderSide::BUY ?
-           resting.getPrice() < incoming.getPrice() :
-           resting.getPrice() > incoming.getPrice();
+           resting.price() < incoming.price() :
+           resting.price() > incoming.price();
 }

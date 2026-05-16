@@ -5,7 +5,7 @@
 #include "tradingengine/PriceLevel.h"
 
 PriceLevel::IterOrder PriceLevel::addOrder(const Order &order) {
-    totalQuantity += order.getQuantity();
+    totalQuantity += order.remaining();
     orders.push_back(order);
 
     return std::prev(orders.end());
@@ -13,7 +13,7 @@ PriceLevel::IterOrder PriceLevel::addOrder(const Order &order) {
 
 void PriceLevel::removeFrontOrder() {
     auto orderUnderRemoval = orders.front();
-    totalQuantity -= orderUnderRemoval.getQuantity();
+    totalQuantity -= orderUnderRemoval.remaining();
 
     orders.pop_front();
 }
@@ -34,7 +34,7 @@ void PriceLevel::removeAt(const PriceLevel::IterOrder &iter) {
 
     if (iter == orders.end()) return;
     auto order = *iter;
-    totalQuantity -= order.getQuantity();
+    totalQuantity -= order.remaining();
 
     orders.erase(iter);
 }

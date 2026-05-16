@@ -5,60 +5,76 @@
 #ifndef HPC_QUEUE_SRC_ORDER_H
 #define HPC_QUEUE_SRC_ORDER_H
 
+#include<algorithm>
 #include<expected>
 #include <tradingengine/types.h>
 
-enum class returnCodes{
-    NOT_ENOUGH_QUANTITY = -2,
+enum class OrderError {
+    InvalidPrice = -1024,
+    InvalidQuantity = -1025,
+    NotEnoughMemory = -1026
 };
 
 
 class Order {
-private:
-    OrderType type;
-    OrderSide side;
-
-    Price price;
-    Quantity quantity;
-
-    OrderId id;
-
 public:
 
-    Order() = default;
-    // Copy
-    Order(const Order& other) = default;
-    Order& operator=(const Order& other) = default;
+    static std::expected<Order, OrderError>
+    create(OrderType type,
+           OrderSide side,
+           Price price,
+           Quantity quantity,
+           OrderId id) {
+        if (price.value <= 0)
+            return std::unexpected(OrderError::InvalidPrice);
 
-    // Move
-    Order(Order&& other) noexcept = default;
-    Order& operator=(Order&& other) =default;
+        if (quantity.value == 0)
+            return std::unexpected(OrderError::InvalidQuantity);
 
-    ~Order() = default;
+        return Order(type, side, price, quantity, id);
+    }
 
-    [[nodiscard]] OrderType getType() const { return type; }
+    [[nodiscard]] constexpr OrderType type() const noexcept { return type_; }
+    [[nodiscard]] constexpr OrderSide side() const noexcept { return side_; }
+    [[nodiscard]] constexpr Price price() const noexcept { return price_; }
+    [[nodiscard]] constexpr Quantity remaining() const noexcept { return remainingQuantity_; }
+    [[nodiscard]] constexpr Quantity original() const noexcept { return originalQuantity_; }
+    [[nodiscard]] constexpr OrderId id() const noexcept { return id_; }
+    [[nodiscard]] constexpr Timestamp timestamp() const noexcept { return timestamp_; }
 
-    void setType(OrderType Type) { type = Type; }
+    void fill(Quantity qty) noexcept {
+        remainingQuantity_ = std::max((remainingQuantity_ - qty), {0});
+    }
 
-    [[nodiscard]] OrderSide getSide() const { return side; }
+    [[nodiscard]] bool isFilled() const noexcept {
+        return remainingQuantity_ == Quantity{0};
+    }
 
-    void setSide(OrderSide Side) { side = Side; }
+private:
+    Order(OrderType type,
+          OrderSide side,
+          Price price,
+          Quantity quantity,
+          OrderId id)
+            : type_(type),
+              side_(side),
+              price_(price),
+              originalQuantity_(quantity),
+              remainingQuantity_(quantity),
+              timestamp_(std::chrono::steady_clock::now()),
+              id_(id) {}
 
-    [[nodiscard]] Price getPrice() const { return price; }
+    OrderType type_;
+    OrderSide side_;
 
-    void setPrice(Price iPrice) { price = iPrice; }
+    Price price_;
 
-    [[nodiscard]] Quantity getQuantity() const { return quantity; }
+    Quantity originalQuantity_;
+    Quantity remainingQuantity_;
 
-    void setQuantity(Quantity iQuantity) { quantity = iQuantity; }
+    OrderId id_;
 
-    [[nodiscard]] OrderId getId() const { return id; }
-
-    void setId(OrderId iId) { id = iId; }
-
-    Quantity subtract(Quantity decQuantity);
-
-    [[nodiscard]] bool isFilled()const {return (quantity.value == 0);}
+    Timestamp timestamp_;
 };
 
 #endif // HPC_QUEUE_SRC_ORDER_H

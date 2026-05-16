@@ -5,11 +5,12 @@
 #include "tradingengine/OrderBook.h"
 
 void OrderBook::submit(Order order) {
-    if (order.getSide() == OrderSide::BUY) {
+    if (order.side() == OrderSide::BUY) {
         matchBuy(order);
     } else {
         matchSell(order);
     }
+
 }
 
 bool OrderBook::cancel(OrderId id, OrderSide side, Quantity PrevQuantity) {
