@@ -66,7 +66,7 @@ An order-id index provides direct access to the order node, enabling efficient c
 The matching engine follows price-time priority:
 
 1. Find the best opposite-side price level.
-2. Consume orders in FIFO order at that level.
+2. Consume orders_ in FIFO order at that level.
 3. Continue sweeping until the incoming order is filled or the book is exhausted.
 4. Remove empty price levels immediately.
 
@@ -122,7 +122,7 @@ Each price level contains:
 - a price,
 - aggregate remainingQty,
 - head/tail pointers,
-- an intrusive doubly linked list of orders.
+- an intrusive doubly linked list of orders_.
 
 ---
 

@@ -42,8 +42,11 @@ public:
     [[nodiscard]] constexpr OrderId id() const noexcept { return id_; }
     [[nodiscard]] constexpr Timestamp timestamp() const noexcept { return timestamp_; }
 
-    void fill(Quantity qty) noexcept {
-        remainingQuantity_ = std::max((remainingQuantity_ - qty), {0});
+    Quantity fill(Quantity qty) noexcept {
+        auto& minimum = std::min(remainingQuantity_, qty);
+        remainingQuantity_ = remainingQuantity_ - minimum;
+
+        return minimum;
     }
 
     [[nodiscard]] bool isFilled() const noexcept {

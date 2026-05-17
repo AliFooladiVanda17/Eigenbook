@@ -5,40 +5,82 @@
 #include "tradingengine/PriceLevel.h"
 
 PriceLevel::IterOrder PriceLevel::addOrder(const Order &order) {
-    totalQuantity += order.remaining();
-    orders.push_back(order);
+    orders_.emplace_back(order);
+    totalQuantity_ += order.remaining();
 
-    return std::prev(orders.end());
+    return std::prev(orders_.end());
 }
 
-void PriceLevel::removeFrontOrder() {
-    auto orderUnderRemoval = orders.front();
-    totalQuantity -= orderUnderRemoval.remaining();
+PriceLevel::IterOrder PriceLevel::addOrder(Order &&order) {
+    orders_.emplace_back(std::move(order));
+    totalQuantity_ += order.remaining();
 
-    orders.pop_front();
+    return std::prev(orders_.end());
+}
+
+Order& PriceLevel::frontOrder() noexcept
+{
+    return orders_.front();
+}
+
+const Order& PriceLevel::frontOrder() const noexcept
+{
+    return orders_.front();
+}
+
+void PriceLevel::consumeFront(Quantity traded)
+{
+    auto& order = orders_.front();
+
+    totalQuantity_ -= order.fill(traded);
+
+    if (order.isFilled()) {
+        orders_.pop_front();
+    }
+}
+
+void PriceLevel::consumeAt(PriceLevel::IterOrder it, Quantity traded)
+{
+    if (it == orders_.end()) return;
+
+    // Precondition: traded <= it->remaining()
+    totalQuantity_ -= it->fill(traded);
+
+    if (it->isFilled()) {
+        orders_.erase(it);
+    }
+}
+
+PriceLevel::IterOrder PriceLevel::removeFrontOrder()
+{
+    return removeAt(orders_.begin());
+}
+
+PriceLevel::IterOrder PriceLevel::removeAt(const IterOrder& it)
+{
+    if (it == orders_.end()) {
+        return it;
+    }
+
+    totalQuantity_ -= it->remaining();
+    return orders_.erase(it);
 }
 
 bool PriceLevel::empty() const noexcept {
-    return orders.empty();
+    return orders_.empty();
 }
 
 std::size_t PriceLevel::orderCount() const noexcept {
-    return orders.size();
+    return orders_.size();
 }
 
 Quantity PriceLevel::quantity() const noexcept {
-    return totalQuantity;
+    return totalQuantity_;
 }
 
-void PriceLevel::removeAt(const PriceLevel::IterOrder &iter) {
-
-    if (iter == orders.end()) return;
-    auto order = *iter;
-    totalQuantity -= order.remaining();
-
-    orders.erase(iter);
+void PriceLevel::clear() noexcept
+{
+    orders_.clear();
+    totalQuantity_ = Quantity{0};
 }
 
-void PriceLevel::updateOrder(PriceLevel::IterOrder &iter, const Order &order) {
-    if (iter != orders.end()) *iter = order;
-}

@@ -13,15 +13,13 @@ public:
     using OrderList = std::list<Order>;
     using IterOrder = std::list<Order>::iterator;
 
-    IterOrder addOrder(const Order& order);
+    IterOrder addOrder(const Order &order);
 
-    void updateOrder(PriceLevel::IterOrder& iter, const Order& order);
+    IterOrder addOrder(Order &&order);
 
-    void removeFrontOrder();
+    IterOrder removeFrontOrder();
 
-    decltype(auto) frontOrder(this auto&& self) {
-        return self.orders.front();
-    }
+    IterOrder removeAt(const IterOrder &);
 
     [[nodiscard]] bool empty() const noexcept;
 
@@ -29,19 +27,29 @@ public:
 
     [[nodiscard]] Quantity quantity() const noexcept;
 
-    void removeAt(const IterOrder&);
-
     PriceLevel() = default;
 
-    PriceLevel(const PriceLevel& newLevel) = default;
-    PriceLevel& operator=(const PriceLevel& newLevel) = default;
+    PriceLevel(const PriceLevel &newLevel) = default;
+    PriceLevel &operator=(const PriceLevel &newLevel) = default;
 
-    PriceLevel(PriceLevel&& newLevel) noexcept = default;
-    PriceLevel& operator=(PriceLevel&& newLevel) noexcept = default;
+    PriceLevel(PriceLevel &&newLevel) noexcept = default;
+    PriceLevel &operator=(PriceLevel &&newLevel) noexcept = default;
+
+    Order &frontOrder() noexcept;
+
+    const Order &frontOrder() const noexcept;
+
+    void consumeFront(Quantity traded);
+
+    void consumeAt(IterOrder it, Quantity traded);
+
+    void clear();
 
 private:
-    OrderList orders;
-    Quantity totalQuantity{0};
+    OrderList orders_;
+    Quantity totalQuantity_{0};
+
+
 };
 
 #endif // HPC_QUEUE_SRC_BOOK_PRICELEVEL_H
