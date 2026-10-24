@@ -1,5 +1,5 @@
 # hpc-queue CMakeLists.txt
-cmake_minimum_required(VERSION 3.31)
+cmake_minimum_required(VERSION 3.20)
 
 project(TradingEngine VERSION 0.1.0 LANGUAGES CXX)
 

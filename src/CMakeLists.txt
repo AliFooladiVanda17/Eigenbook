@@ -1,14 +1,15 @@
 add_library(TradingEngine STATIC
         engine/TradingEngine.cpp
+        ../include/tradingengine/TradingEngine.h
         ../include/tradingengine/types.h
-        book/order.cpp
         ../include/tradingengine/order.h
         book/orderbook.cpp
         ../include/tradingengine/orderbook.h
-        book/PriceLadder.cpp
+        ../include/tradingengine/OrderIndex.h
         ../include/tradingengine/PriceLadder.h
-        book/PriceLevel.cpp
         ../include/tradingengine/PriceLevel.h
+        ../include/tradingengine/util/LevelBitmap.h
+        ../include/tradingengine/util/ObjectPool.h
 )
 
 target_include_directories(TradingEngine

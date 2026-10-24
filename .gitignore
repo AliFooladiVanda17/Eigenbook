@@ -1,0 +1,85 @@
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+build/
+build-*/
+out/
+cmake-build-*/
+_deps/
+
+# CMake-generated files (for in-source builds)
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+
+# ---------------------------------------------------------------------------
+# Compiled objects and binaries
+# ---------------------------------------------------------------------------
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.gch
+*.pch
+*.ninja_deps
+*.ninja_log
+.ninja_*
+
+# ---------------------------------------------------------------------------
+# Editors and IDEs
+# ---------------------------------------------------------------------------
+# VS Code: per-user settings
+.vscode/
+
+# CLion / JetBrains: shared project settings stay tracked, per-user files do not
+.idea/workspace.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+.idea/tasks.xml
+.idea/dictionaries/
+.idea/httpRequests/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# clangd
+.cache/
+
+# ---------------------------------------------------------------------------
+# Tooling output
+# ---------------------------------------------------------------------------
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+*.gcov
+perf.data*
+callgrind.out.*
+
+# ---------------------------------------------------------------------------
+# Operating systems
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
