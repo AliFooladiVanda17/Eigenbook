@@ -1,9 +1,4 @@
-//
-// Created by afouladi on 5/12/2026.
-//
-
-#ifndef HPC_QUEUE_INCLUDE_TRADINGENGINE_UTIL_LEVELBITMAP_H
-#define HPC_QUEUE_INCLUDE_TRADINGENGINE_UTIL_LEVELBITMAP_H
+#pragma once
 
 #include <algorithm>
 #include <bit>
@@ -12,6 +7,8 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
+
+namespace eigenbook {
 
 // Two-level occupancy bitset for a dense price ladder.
 //
@@ -123,4 +120,4 @@ private:
     std::vector<std::uint64_t> summary;
 };
 
-#endif // HPC_QUEUE_INCLUDE_TRADINGENGINE_UTIL_LEVELBITMAP_H
+} // namespace eigenbook

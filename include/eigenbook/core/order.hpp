@@ -1,12 +1,9 @@
-//
-// Created by afouladi on 5/12/2026.
-//
-
-#ifndef HPC_QUEUE_SRC_ORDER_H
-#define HPC_QUEUE_SRC_ORDER_H
+#pragma once
 
 #include <type_traits>
 #include <eigenbook/core/types.hpp>
+
+namespace eigenbook {
 
 class PriceLevel;
 
@@ -77,4 +74,4 @@ using OrderNode = Order;
 static_assert(sizeof(Order) == kCacheLineSize, "Order must occupy exactly one cache line");
 static_assert(std::is_trivially_destructible_v<Order>, "the pool releases nodes without destructors");
 
-#endif // HPC_QUEUE_SRC_ORDER_H
+} // namespace eigenbook

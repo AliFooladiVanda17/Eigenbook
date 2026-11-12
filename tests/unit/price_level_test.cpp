@@ -8,6 +8,8 @@
 
 #include "test_support.hpp"
 
+namespace eigenbook {
+
 namespace {
 
 std::vector<std::uint64_t> ids(const PriceLevel& level) {
@@ -100,3 +102,5 @@ TEST(PriceLevel, ReduceKeepsPosition) {
     EXPECT_EQ(a.getQuantity(), Quantity{3});
     EXPECT_EQ(level.quantity(), Quantity{13});
 }
+
+} // namespace eigenbook

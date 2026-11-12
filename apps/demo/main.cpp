@@ -11,7 +11,7 @@ namespace {
 struct Op {
     enum Kind : std::uint8_t { ADD, CANCEL };
     Kind kind;
-    OrderRequest request;
+    eigenbook::OrderRequest request;
 };
 
 // Random walk around a mid price: mostly passive limits with some aggressive ones and cancels.
@@ -31,15 +31,17 @@ std::vector<Op> makeWorkload(const std::size_t count) {
             live.pop_back();
             continue;
         }
-        const OrderSide side = rng() % 2 ? OrderSide::BUY : OrderSide::SELL;
+        const eigenbook::OrderSide side = rng() % 2 ? eigenbook::OrderSide::BUY
+                                                    : eigenbook::OrderSide::SELL;
         const std::int64_t offset = static_cast<std::int64_t>(rng() % 64) - 8;
-        const std::int64_t price = side == OrderSide::BUY ? 10'000 - offset : 10'000 + offset;
-        const OrderRequest request{.id = {nextId},
-                                   .side = side,
-                                   .type = OrderType::LIMIT,
-                                   .price = {price},
-                                   .quantity = {1 + rng() % 100},
-                                   .timestamp = {nextId}};
+        const std::int64_t price = side == eigenbook::OrderSide::BUY ? 10'000 - offset
+                                                                     : 10'000 + offset;
+        const eigenbook::OrderRequest request{.id = {nextId},
+                                              .side = side,
+                                              .type = eigenbook::OrderType::LIMIT,
+                                              .price = {price},
+                                              .quantity = {1 + rng() % 100},
+                                              .timestamp = {nextId}};
         live.push_back(nextId++);
         ops.push_back({Op::ADD, request});
     }
@@ -49,7 +51,9 @@ std::vector<Op> makeWorkload(const std::size_t count) {
 template <typename Book>
 void run(const char* name, Book& book, const std::vector<Op>& ops) {
     std::uint64_t fills = 0;
-    auto onFill = [&fills](const Fill&) { ++fills; };
+    auto onFill = [&fills](const eigenbook::Fill&) {
+        ++fills;
+    };
 
     const auto start = std::chrono::steady_clock::now();
     for (const Op& op : ops) {
@@ -75,10 +79,12 @@ int main() {
     constexpr std::size_t kOps = 2'000'000;
     const std::vector<Op> ops = makeWorkload(kOps);
 
-    OrderBook mapBook(InstrumentId{1}, {}, kOps);
+    eigenbook::OrderBook mapBook(eigenbook::InstrumentId{1}, {}, kOps);
     run("std::map ladder    ", mapBook, ops);
 
-    DenseOrderBook denseBook(InstrumentId{1}, {.minPrice = {9'000}, .tickCount = 2'048}, kOps);
+    eigenbook::DenseOrderBook denseBook(eigenbook::InstrumentId{1},
+                                        {.minPrice = {9'000}, .tickCount = 2'048},
+                                        kOps);
     run("array+bitset ladder", denseBook, ops);
     return 0;
 }

@@ -8,6 +8,8 @@
 
 #include "test_support.hpp"
 
+namespace eigenbook {
+
 TEST(Price, ArithmeticIsInTicks) {
     constexpr Price p{100};
     static_assert(p + 5 == Price{105});
@@ -64,3 +66,5 @@ TEST(Order, OccupiesExactlyOneCacheLine) {
     EXPECT_EQ(sizeof(Order), kCacheLineSize);
     EXPECT_EQ(alignof(Order), kCacheLineSize);
 }
+
+} // namespace eigenbook

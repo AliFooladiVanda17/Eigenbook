@@ -1,9 +1,4 @@
-//
-// Created by afouladi on 5/12/2026.
-//
-
-#ifndef HPC_QUEUE_SRC_BOOK_PRICELADDER_H
-#define HPC_QUEUE_SRC_BOOK_PRICELADDER_H
+#pragma once
 
 #include <cassert>
 #include <concepts>
@@ -17,6 +12,8 @@
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/types.hpp>
 #include <eigenbook/util/level_bitmap.hpp>
+
+namespace eigenbook {
 
 // Price ordering of one side of the book: "better" is higher for bids, lower for asks.
 template <OrderSide Side>
@@ -316,4 +313,4 @@ static_assert(PriceLadder<MapPriceLadder<OrderSide::SELL>>);
 static_assert(PriceLadder<ArrayPriceLadder<OrderSide::BUY>>);
 static_assert(PriceLadder<ArrayPriceLadder<OrderSide::SELL>>);
 
-#endif // HPC_QUEUE_SRC_BOOK_PRICELADDER_H
+} // namespace eigenbook

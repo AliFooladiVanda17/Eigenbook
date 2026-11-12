@@ -1,9 +1,4 @@
-//
-// Created by afouladi on 5/12/2026.
-//
-
-#ifndef HPC_QUEUE_INCLUDE_TRADINGENGINE_UTIL_OBJECTPOOL_H
-#define HPC_QUEUE_INCLUDE_TRADINGENGINE_UTIL_OBJECTPOOL_H
+#pragma once
 
 #include <cassert>
 #include <cstddef>
@@ -12,6 +7,8 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+namespace eigenbook {
 
 // Single-threaded fixed-size object pool.
 //
@@ -88,4 +85,4 @@ private:
     std::size_t live{0};
 };
 
-#endif // HPC_QUEUE_INCLUDE_TRADINGENGINE_UTIL_OBJECTPOOL_H
+} // namespace eigenbook

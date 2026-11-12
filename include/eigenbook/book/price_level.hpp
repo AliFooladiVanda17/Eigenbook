@@ -1,14 +1,11 @@
-//
-// Created by afouladi on 5/12/2026.
-//
-
-#ifndef HPC_QUEUE_SRC_BOOK_PRICELEVEL_H
-#define HPC_QUEUE_SRC_BOOK_PRICELEVEL_H
+#pragma once
 
 #include <cassert>
 #include <cstdint>
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/types.hpp>
+
+namespace eigenbook {
 
 // All resting orders at one price, in arrival order (intrusive doubly linked list).
 //
@@ -123,4 +120,4 @@ private:
     std::uint32_t count{0};
 };
 
-#endif // HPC_QUEUE_SRC_BOOK_PRICELEVEL_H
+} // namespace eigenbook

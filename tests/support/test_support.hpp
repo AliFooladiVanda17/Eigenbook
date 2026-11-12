@@ -1,15 +1,16 @@
 //
-// Shared helpers for the TradingEngine test suite.
+// Shared helpers for the Eigenbook test suite.
 //
 
-#ifndef TRADINGENGINE_TESTS_TESTSUPPORT_H
-#define TRADINGENGINE_TESTS_TESTSUPPORT_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
 #include <vector>
 
 #include <eigenbook/book/order_book.hpp>
+
+namespace eigenbook {
 
 inline constexpr InstrumentId kInstrument{7};
 
@@ -65,4 +66,4 @@ struct BookFactory<DenseOrderBook> {
     }
 };
 
-#endif // TRADINGENGINE_TESTS_TESTSUPPORT_H
+} // namespace eigenbook

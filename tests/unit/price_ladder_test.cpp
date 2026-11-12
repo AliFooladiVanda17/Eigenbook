@@ -8,6 +8,8 @@
 
 #include "test_support.hpp"
 
+namespace eigenbook {
+
 namespace {
 
 template <typename Ladder>
@@ -147,3 +149,5 @@ TEST(MapPriceLadder, AcceptsAnyPrice) {
     EXPECT_TRUE(ladder.accepts(Price{INT64_MIN}));
     EXPECT_TRUE(ladder.accepts(Price{INT64_MAX}));
 }
+
+} // namespace eigenbook

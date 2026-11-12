@@ -1,9 +1,4 @@
-//
-// Created by afouladi on 5/12/2026.
-//
-
-#ifndef HPC_QUEUE_INCLUDE_TRADINGENGINE_ORDERINDEX_H
-#define HPC_QUEUE_INCLUDE_TRADINGENGINE_ORDERINDEX_H
+#pragma once
 
 #include <algorithm>
 #include <bit>
@@ -13,6 +8,8 @@
 #include <vector>
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/types.hpp>
+
+namespace eigenbook {
 
 // OrderId -> Order* for O(1) cancel / modify.
 //
@@ -135,4 +132,4 @@ private:
     std::size_t count{0};
 };
 
-#endif // HPC_QUEUE_INCLUDE_TRADINGENGINE_ORDERINDEX_H
+} // namespace eigenbook

@@ -9,6 +9,8 @@
 
 #include "test_support.hpp"
 
+namespace eigenbook {
+
 namespace {
 
 template <typename Book>
@@ -415,3 +417,5 @@ TEST(OrderBook, AcceptsNegativeAndVeryLargePrices) {
     EXPECT_EQ(book.bestBid(), Price{-1'000'000});
     EXPECT_EQ(book.bestAsk(), Price{1'000'000'000'000});
 }
+
+} // namespace eigenbook

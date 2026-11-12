@@ -1,9 +1,4 @@
-//
-// Created by afouladi on 5/12/2026.
-//
-
-#ifndef HPC_QUEUE_SRC_BOOK_ORDERBOOK_H
-#define HPC_QUEUE_SRC_BOOK_ORDERBOOK_H
+#pragma once
 
 #include <algorithm>
 #include <cstddef>
@@ -16,6 +11,8 @@
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/types.hpp>
 #include <eigenbook/util/object_pool.hpp>
+
+namespace eigenbook {
 
 enum class RejectReason : std::uint8_t {
     INVALID_QUANTITY,   // zero quantity
@@ -378,4 +375,4 @@ void BasicOrderBook<Ladder>::removeResting(Order& order) noexcept {
 extern template class BasicOrderBook<MapPriceLadder>;
 extern template class BasicOrderBook<ArrayPriceLadder>;
 
-#endif // HPC_QUEUE_SRC_BOOK_ORDERBOOK_H
+} // namespace eigenbook

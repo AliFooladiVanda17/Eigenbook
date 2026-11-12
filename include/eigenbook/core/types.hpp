@@ -1,14 +1,11 @@
-//
-// Created by afouladi on 5/12/2026.
-//
-
-#ifndef HPC_QUEUE_INCLUDE_TRADINGENGINE_TYPES_H
-#define HPC_QUEUE_INCLUDE_TRADINGENGINE_TYPES_H
+#pragma once
 
 #include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+
+namespace eigenbook {
 
 // Fixed instead of std::hardware_destructive_interference_size, which is not ABI-stable
 // (GCC warns on it) and is 64 on every x86-64 / most ARM64 targets we care about.
@@ -89,27 +86,6 @@ struct ShardId {
     constexpr auto operator<=>(const ShardId&) const noexcept = default;
 };
 
-template <>
-struct std::hash<OrderId> {
-    std::size_t operator()(const OrderId& id) const noexcept {
-        return std::hash<std::uint64_t>{}(id.value);
-    }
-};
-
-template <>
-struct std::hash<InstrumentId> {
-    std::size_t operator()(const InstrumentId& id) const noexcept {
-        return std::hash<std::uint32_t>{}(id.value);
-    }
-};
-
-template <>
-struct std::hash<ShardId> {
-    std::size_t operator()(const ShardId& id) const noexcept {
-        return std::hash<std::uint16_t>{}(id.value);
-    }
-};
-
 enum class OrderSide : std::uint8_t {
     BUY,
     SELL
@@ -124,4 +100,26 @@ enum class OrderType : std::uint8_t {
     return side == OrderSide::BUY ? OrderSide::SELL : OrderSide::BUY;
 }
 
-#endif // HPC_QUEUE_INCLUDE_TRADINGENGINE_TYPES_H
+} // namespace eigenbook
+
+// std::hash specialisations must be declared outside namespace eigenbook.
+template <>
+struct std::hash<eigenbook::OrderId> {
+    std::size_t operator()(const eigenbook::OrderId& id) const noexcept {
+        return std::hash<std::uint64_t>{}(id.value);
+    }
+};
+
+template <>
+struct std::hash<eigenbook::InstrumentId> {
+    std::size_t operator()(const eigenbook::InstrumentId& id) const noexcept {
+        return std::hash<std::uint32_t>{}(id.value);
+    }
+};
+
+template <>
+struct std::hash<eigenbook::ShardId> {
+    std::size_t operator()(const eigenbook::ShardId& id) const noexcept {
+        return std::hash<std::uint16_t>{}(id.value);
+    }
+};

@@ -14,6 +14,8 @@
 #include <eigenbook/util/level_bitmap.hpp>
 #include <eigenbook/util/object_pool.hpp>
 
+namespace eigenbook {
+
 TEST(LevelBitmap, FindNextAndPrevMatchReferenceSet) {
     constexpr std::size_t kBits = 70'000; // spans several summary words, ragged tail
     LevelBitmap bitmap(kBits);
@@ -93,3 +95,5 @@ TEST(ObjectPool, RecyclesSlotsWithoutGrowing) {
     EXPECT_EQ(pool.capacity(), 8u);
     EXPECT_EQ(pool.size(), 8u);
 }
+
+} // namespace eigenbook

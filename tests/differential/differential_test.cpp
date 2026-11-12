@@ -11,6 +11,8 @@
 
 #include "test_support.hpp"
 
+namespace eigenbook {
+
 namespace {
 
 // Deliberately simple: one vector per side, scanned linearly.
@@ -183,3 +185,5 @@ TEST(OrderBookDifferential, MapDenseAndReferenceAgree) {
         }
     }
 }
+
+} // namespace eigenbook
