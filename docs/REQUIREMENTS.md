@@ -18,19 +18,19 @@ Status values: **Done** (implemented and tested), **Partial**, **Planned**.
 | Component | Minimum | Tested with | Notes |
 |---|---|---|---|
 | C++ standard | C++23 | C++23 | Uses `std::expected`, concepts, designated initialisers |
-| CMake | 3.20 | 4.0.1 | |
+| CMake | 3.25 | 4.0.1 | `FILE_SET HEADERS` (3.23), `SYSTEM` on `FetchContent_Declare` and presets schema 6 (3.25) |
 | MSVC | 19.38 (VS 2022 17.8) | 19.44 (VS 2022 Build Tools 17.14) | Windows |
 | GCC | 13 | – | Linux; first release with `std::expected` |
-| Clang | 17 with libc++ or libstdc++ 13 | – | Linux / macOS |
-| Build tool | Ninja (recommended), Make, or Visual Studio generator | Ninja 1.12 | |
-| Git | any | – | Needed by CMake to fetch GoogleTest |
+| Clang | 17 with libc++ or libstdc++ 13 | 21.1.8 (Windows, MSVC STL) | Linux / macOS / Windows |
+| Build tool | Ninja (recommended), Make, or Visual Studio generator | Ninja 1.12, VS 2022 | |
+| Git | any | – | Needed by CMake to fetch GoogleTest (tests only) |
 
 ### 1.2 Dependencies
 
 | Dependency | Version | Scope | How it is obtained |
 |---|---|---|---|
 | C++ standard library | C++23 | Library | Shipped with the compiler |
-| [GoogleTest](https://github.com/google/googletest) | 1.15.2 | Tests only | Downloaded at configure time by CMake `FetchContent` |
+| [GoogleTest](https://github.com/google/googletest) | 1.15.2 (commit `b514bdc898e2951020cbdca1304b75f5950d1f59`) | Tests only | CMake `FetchContent`, pinned by SHA in `cmake/Dependencies.cmake`; offline via `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` |
 
 The library itself has **no third-party runtime dependencies**.
 
@@ -123,8 +123,10 @@ The library itself has **no third-party runtime dependencies**.
 | NFR-06 | Determinism | The same input sequence MUST always produce the same fills and book state. | Done | `OrderBookDifferential.MapDenseAndReferenceAgree` (fixed seeds) |
 | NFR-07 | Type safety | Prices, quantities, ids and timestamps MUST be distinct strong types. | Done | `types.h`; `Price.*`, `Quantity.*`, `StrongIds.*` |
 | NFR-08 | Error handling | Business rejections MUST be returned as values (`std::expected`), not thrown. | Done | `OrderBookTest.RejectsInvalidRequests` |
-| NFR-09 | Portability | The code MUST build without warnings beyond `/W4` or `-Wall -Wextra -Wpedantic` level, except documented ones. | Partial | MSVC reports C4324 (intentional padding in `ObjectPool`) |
+| NFR-09 | Portability | The code MUST build without warnings under the `eigenbook_warnings` set (`/W4 /permissive- /Zc:__cplusplus`; `-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wold-style-cast`), except documented, locally scoped suppressions. | Done | Builds with `EIGENBOOK_WARNINGS_AS_ERRORS=ON` on MSVC 19.44 and Clang 21; the only suppression is C4324 in `object_pool.hpp` (intentional alignment padding, commented). GCC not yet tested. |
 | NFR-10 | Quality | Every functional requirement marked Done MUST be covered by at least one automated test. | Done | This document |
+| NFR-11 | Packaging | The library MUST be consumable from an install tree with `find_package(Eigenbook CONFIG)`, providing `Eigenbook::book` and `Eigenbook::eigenbook`. | Done | CTest `package_consumer` (installs the build, then configures, builds and runs `tests/package_consumer` against the install prefix only) |
+| NFR-12 | Packaging | The order book MUST be header-only: using it MUST NOT require linking a compiled library. Every member of the supported book and ladder instantiations MUST still be compiled by the test build. | Done | `Eigenbook::book` is an `INTERFACE` target; `tests/unit/instantiation_test.cpp` explicitly instantiates `BasicOrderBook<MapPriceLadder>`, `BasicOrderBook<ArrayPriceLadder>`, both ladders on both sides, and `ObjectPool<Order>` |
 
 ---
 

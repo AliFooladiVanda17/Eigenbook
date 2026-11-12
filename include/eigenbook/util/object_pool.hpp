@@ -64,10 +64,19 @@ public:
     [[nodiscard]] std::size_t size() const noexcept { return live; }
 
 private:
+    // MSVC C4324 ("structure was padded due to alignment specifier") is expected here: a slot must
+    // keep T's alignment (64 bytes for Order), which is the point of the alignas.
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
     union Slot {
         Slot* next;
         alignas(T) std::byte storage[sizeof(T)];
     };
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#endif
 
     void addChunk() {
         auto chunk = std::make_unique_for_overwrite<Slot[]>(chunkSize);

@@ -1,0 +1,36 @@
+# clang-tidy configuration. Run with a compile database, e.g.
+#   cmake --preset dev-debug && clang-tidy -p build/dev-debug <files>
+#
+# Disabled checks and why:
+#   bugprone-easily-swappable-parameters   flags every (Price, Quantity) pair; strong types already
+#                                          prevent most swaps at compile time
+#   modernize-use-trailing-return-type     style only
+#   modernize-avoid-c-arrays               std::byte storage[sizeof(T)] in the object pool is
+#                                          intentional raw storage
+#   performance-enum-size                  enums are already sized explicitly where it matters
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  performance-*,
+  -performance-enum-size,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-missing-std-forward,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-static-cast-downcast,
+  cppcoreguidelines-rvalue-reference-param-not-moved,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*[/\\](include|tests|apps|bench)[/\\].*'
+FormatStyle: file
+CheckOptions:
+  - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value: true

@@ -67,9 +67,10 @@ TYPED_TEST(OrderBookTest, LevelTracksAggregateQuantityAndFifo) {
 
 TYPED_TEST(OrderBookTest, ForEachLevelVisitsBestToWorst) {
     auto& book = *this->book;
-    for (std::uint64_t i = 0; i < 5; ++i) {
-        ASSERT_TRUE(book.addOrder(limit(10 + i, OrderSide::BUY, 90 + 2 * i, 1)));
-        ASSERT_TRUE(book.addOrder(limit(20 + i, OrderSide::SELL, 200 - 3 * i, 1)));
+    for (std::int64_t i = 0; i < 5; ++i) {
+        const auto n = static_cast<std::uint64_t>(i);
+        ASSERT_TRUE(book.addOrder(limit(10 + n, OrderSide::BUY, 90 + 2 * i, 1)));
+        ASSERT_TRUE(book.addOrder(limit(20 + n, OrderSide::SELL, 200 - 3 * i, 1)));
     }
     std::vector<std::int64_t> bidPrices, askPrices;
     book.bids().forEachLevel([&](const PriceLevel& l) { bidPrices.push_back(l.price().value); });

@@ -1,0 +1,149 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "installDir": "${sourceDir}/build/${presetName}/install",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "ninja",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Ninja"
+    },
+    {
+      "name": "dev-debug",
+      "displayName": "Debug (Ninja, default compiler)",
+      "inherits": "ninja",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "dev-release",
+      "displayName": "Release (Ninja, default compiler)",
+      "inherits": "ninja",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "relwithdebinfo",
+      "displayName": "RelWithDebInfo (Ninja, default compiler)",
+      "inherits": "ninja",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "asan-ubsan",
+      "displayName": "AddressSanitizer + UBSan (GCC or Clang)",
+      "inherits": "ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "EIGENBOOK_SANITIZE": "address;undefined",
+        "EIGENBOOK_INSTALL": "OFF"
+      }
+    },
+    {
+      "name": "tsan",
+      "displayName": "ThreadSanitizer (GCC or Clang, not Windows)",
+      "inherits": "ninja",
+      "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "EIGENBOOK_SANITIZE": "thread",
+        "EIGENBOOK_INSTALL": "OFF"
+      }
+    },
+    {
+      "name": "msvc",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "msvc-debug",
+      "displayName": "MSVC Debug (Visual Studio 2022)",
+      "inherits": "msvc",
+      "cacheVariables": { "CMAKE_CONFIGURATION_TYPES": "Debug" }
+    },
+    {
+      "name": "msvc-release",
+      "displayName": "MSVC Release (Visual Studio 2022)",
+      "inherits": "msvc",
+      "cacheVariables": { "CMAKE_CONFIGURATION_TYPES": "Release" }
+    },
+    {
+      "name": "msvc-asan",
+      "displayName": "MSVC Debug + AddressSanitizer (Visual Studio 2022)",
+      "inherits": "msvc",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Debug",
+        "EIGENBOOK_SANITIZE": "address",
+        "EIGENBOOK_INSTALL": "OFF"
+      }
+    },
+    {
+      "name": "bench",
+      "displayName": "Benchmarks (Release; LTO off, see bench-lto)",
+      "inherits": "ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "EIGENBOOK_BUILD_TESTS": "OFF",
+        "EIGENBOOK_INSTALL": "OFF"
+      }
+    },
+    {
+      "name": "bench-lto",
+      "displayName": "Benchmarks (Release + LTO)",
+      "inherits": "bench",
+      "cacheVariables": { "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev-debug", "configurePreset": "dev-debug" },
+    { "name": "dev-release", "configurePreset": "dev-release" },
+    { "name": "relwithdebinfo", "configurePreset": "relwithdebinfo" },
+    { "name": "asan-ubsan", "configurePreset": "asan-ubsan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "msvc-debug", "configurePreset": "msvc-debug", "configuration": "Debug" },
+    { "name": "msvc-release", "configurePreset": "msvc-release", "configuration": "Release" },
+    { "name": "msvc-asan", "configurePreset": "msvc-asan", "configuration": "Debug" },
+    { "name": "bench", "configurePreset": "bench" },
+    { "name": "bench-lto", "configurePreset": "bench-lto" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    { "name": "dev-debug", "inherits": "test-base", "configurePreset": "dev-debug" },
+    { "name": "dev-release", "inherits": "test-base", "configurePreset": "dev-release" },
+    { "name": "relwithdebinfo", "inherits": "test-base", "configurePreset": "relwithdebinfo" },
+    { "name": "asan-ubsan", "inherits": "test-base", "configurePreset": "asan-ubsan" },
+    { "name": "tsan", "inherits": "test-base", "configurePreset": "tsan" },
+    {
+      "name": "msvc-debug",
+      "inherits": "test-base",
+      "configurePreset": "msvc-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "msvc-release",
+      "inherits": "test-base",
+      "configurePreset": "msvc-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "msvc-asan",
+      "inherits": "test-base",
+      "configurePreset": "msvc-asan",
+      "configuration": "Debug"
+    }
+  ]
+}

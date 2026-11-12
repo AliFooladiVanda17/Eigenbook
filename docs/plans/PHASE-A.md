@@ -1,6 +1,6 @@
 # Phase A: standard layout, latency harness, map-ladder tail, cancel-path tail
 
-Status: A0 done (recon), A1 in progress.
+Status: A0 done (recon); A1 steps 1–4 done, step 5 next.
 
 ## A0 recon results
 
@@ -155,7 +155,7 @@ Content edits allowed in step 1: `#include` paths, the CMake source/header lists
   package is arch-independent (`ARCH_INDEPENDENT` on the version file).
 - `tests/package_consumer/`: tiny project, `find_package(Eigenbook CONFIG REQUIRED)`, links
   `Eigenbook::book`, runs one order through a book. A CTest test (`package_consumer`) installs the
-  build tree into `${CMAKE_BINARY_DIR}/pkg-install`, then configures, builds and runs the
+  build tree into `<build>/tests/package_consumer/install`, then configures, builds and runs the
   consumer against it.
 - `CMakePresets.json` (version 6): `dev-debug`, `dev-release`, `relwithdebinfo` (Ninja, default
   compiler), `asan-ubsan` (clang/gcc), `tsan` (clang/gcc, Linux), `msvc-debug`, `msvc-release`
@@ -163,6 +163,30 @@ Content edits allowed in step 1: `#include` paths, the CMake source/header lists
   `CMAKE_INTERPROCEDURAL_OPTIMIZATION`). Matching build and test presets.
 - `.clang-tidy` (`bugprone-*`, `performance-*`, `modernize-*` minus `use-trailing-return-type`
   and `avoid-c-arrays`, selected `cppcoreguidelines-*`), `.editorconfig`.
+
+**As built (deviations from the bullets above):**
+
+- `src/CMakeLists.txt` is kept and now defines the library targets (`eigenbook_book`, umbrella
+  `eigenbook`); the top-level file only sets options and adds subdirectories. Install rules are
+  in `cmake/EigenbookInstall.cmake` behind `EIGENBOOK_INSTALL` (default `PROJECT_IS_TOP_LEVEL`).
+- The umbrella target is named `eigenbook` (export name `Eigenbook::eigenbook`), not
+  `eigenbook_eigenbook`.
+- Package config is **not** `ARCH_INDEPENDENT`: `Eigenbook::platform` (STATIC) joins it in A2,
+  and changing install layout twice would break consumers.
+- `EIGENBOOK_BUILD_BENCH` is added in A2 together with `bench/`; the `bench` / `bench-lto`
+  presets exist now (Release, tests off) and gain the option in A2. `EIGENBOOK_BUILD_FUZZ` later.
+- `msvc-*` presets use the Visual Studio 2022 generator (works from any shell, no developer
+  prompt needed), one configuration per build directory. Added `msvc-asan`
+  (`/fsanitize=address`, Debug).
+- `include(CTest)` replaced by `enable_testing()` (no Dart/CDash targets).
+- Test discovery: `DISCOVERY_MODE PRE_TEST` + `DISCOVERY_TIMEOUT 60`. The intermittent post-build
+  failure seen in steps 1–3 was `--gtest_list_tests` exceeding the 5 s default on the first launch
+  of a freshly linked binary (later launches ~0.1 s).
+- Sanitizer runtime DLL (Windows: clang's or MSVC's `clang_rt.asan_dynamic-x86_64.dll`) is copied
+  next to each executable after linking, because GoogleTest's discovery step does not take a
+  modified `PATH`.
+- Test executable renamed `TradingEngine_tests` → `eigenbook_tests`, demo `TradingEngine_app` →
+  `eigenbook_demo`. Test case names are unchanged.
 
 ### Step 5: documentation
 

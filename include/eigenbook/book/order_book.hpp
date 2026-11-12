@@ -367,8 +367,4 @@ void BasicOrderBook<Ladder>::removeResting(Order& order) noexcept {
     pool.destroy(&order);
 }
 
-// The two supported books are compiled once, in orderbook.cpp.
-extern template class BasicOrderBook<MapPriceLadder>;
-extern template class BasicOrderBook<ArrayPriceLadder>;
-
 } // namespace eigenbook

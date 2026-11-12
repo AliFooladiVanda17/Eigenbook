@@ -1,49 +1,34 @@
-add_library(TradingEngine STATIC
-        engine/TradingEngine.cpp
-        ../include/tradingengine/TradingEngine.h
-        ../include/eigenbook/core/types.hpp
-        ../include/eigenbook/core/order.hpp
-        ../include/eigenbook/core/reject_reason.hpp
-        book/orderbook.cpp
-        ../include/eigenbook/book/order_book.hpp
-        ../include/eigenbook/book/locator/hash_order_index.hpp
-        ../include/eigenbook/book/price_ladder.hpp
-        ../include/eigenbook/book/ladder/map_ladder.hpp
-        ../include/eigenbook/book/ladder/dense_ladder.hpp
-        ../include/eigenbook/book/price_level.hpp
-        ../include/eigenbook/util/level_bitmap.hpp
-        ../include/eigenbook/util/object_pool.hpp
+# Library targets.
+#
+# Eigenbook::book      header-only order book (INTERFACE)
+# Eigenbook::eigenbook umbrella target that links every public library
+#
+# Eigenbook::platform (STATIC, src/platform/*.cpp) is added together with its first sources.
+
+add_library(eigenbook_book INTERFACE)
+add_library(Eigenbook::book ALIAS eigenbook_book)
+set_target_properties(eigenbook_book PROPERTIES EXPORT_NAME book)
+
+target_sources(eigenbook_book
+        INTERFACE
+        FILE_SET HEADERS
+        BASE_DIRS ${PROJECT_SOURCE_DIR}/include
+        FILES
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/core/types.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/core/order.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/core/reject_reason.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/price_level.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/price_ladder.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/map_ladder.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/dense_ladder.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/locator/hash_order_index.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/order_book.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/util/level_bitmap.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/util/object_pool.hpp
 )
 
-target_include_directories(TradingEngine
-        PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
+target_compile_features(eigenbook_book INTERFACE cxx_std_23)
 
-target_compile_features(TradingEngine
-        PUBLIC
-        cxx_std_23
-)
-
-target_compile_options(TradingEngine
-        PRIVATE
-        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
-        $<$<CXX_COMPILER_ID:MSVC>:/W4>
-)
-
-install(TARGETS TradingEngine
-        EXPORT TradingEngineTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-
-install(EXPORT TradingEngineTargets
-        FILE TradingEngineTargets.cmake
-        NAMESPACE TradingEngine::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/TradingEngine
-)
+add_library(eigenbook INTERFACE)
+add_library(Eigenbook::eigenbook ALIAS eigenbook)
+target_link_libraries(eigenbook INTERFACE eigenbook_book)

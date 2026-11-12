@@ -1,12 +1,9 @@
-add_executable(TradingEngine_app
-                main.cpp)
+add_executable(eigenbook_demo main.cpp)
 
-target_link_libraries(TradingEngine_app
+target_link_libraries(eigenbook_demo
         PRIVATE
-        TradingEngine
+        Eigenbook::book
+        eigenbook_warnings
 )
 
-target_compile_features(TradingEngine_app
-        PRIVATE
-        cxx_std_23
-)
+eigenbook_copy_sanitizer_runtime(eigenbook_demo)
