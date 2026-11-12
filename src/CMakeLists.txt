@@ -3,10 +3,13 @@ add_library(TradingEngine STATIC
         ../include/tradingengine/TradingEngine.h
         ../include/eigenbook/core/types.hpp
         ../include/eigenbook/core/order.hpp
+        ../include/eigenbook/core/reject_reason.hpp
         book/orderbook.cpp
         ../include/eigenbook/book/order_book.hpp
         ../include/eigenbook/book/locator/hash_order_index.hpp
         ../include/eigenbook/book/price_ladder.hpp
+        ../include/eigenbook/book/ladder/map_ladder.hpp
+        ../include/eigenbook/book/ladder/dense_ladder.hpp
         ../include/eigenbook/book/price_level.hpp
         ../include/eigenbook/util/level_bitmap.hpp
         ../include/eigenbook/util/object_pool.hpp
