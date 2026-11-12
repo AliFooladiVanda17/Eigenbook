@@ -1,0 +1,16 @@
+CPU            : 13th Gen Intel(R) Core(TM) i7-13650HX (GenuineIntel)
+Logical CPUs   : 20 (14 cores, hybrid: 12 logical CPUs on P-cores)
+Pinned to      : CPU 2 (P-core)
+Priority       : HIGH_PRIORITY_CLASS + THREAD_PRIORITY_TIME_CRITICAL
+OS             : Windows 10.0.26200
+Power policy   : Balanced
+Power source   : battery
+Large pages    : not available
+Invariant TSC  : yes
+TSC frequency  : 2.8032 GHz (calibrated over 1 s, spread 6.13584e-06 %)
+Timer overhead : min 49, p50 57, p99 77 TSC ticks (empty tscStart/tscStop pair, not subtracted)
+Clock check    : timer overhead p50 57 at start, 55 at end (-3.50877 %)
+Compiler       : MSVC 19.44.35229.0
+Build type     : Release
+Flags          : /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG
+Git            : 74e5b83445ac-dirty
