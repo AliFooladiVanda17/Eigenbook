@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <unordered_set>
 
-#include "TestSupport.h"
+#include "test_support.hpp"
 
 TEST(Price, ArithmeticIsInTicks) {
     constexpr Price p{100};

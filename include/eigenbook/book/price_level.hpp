@@ -7,8 +7,8 @@
 
 #include <cassert>
 #include <cstdint>
-#include <tradingengine/order.h>
-#include <tradingengine/types.h>
+#include <eigenbook/core/order.hpp>
+#include <eigenbook/core/types.hpp>
 
 // All resting orders at one price, in arrival order (intrusive doubly linked list).
 //

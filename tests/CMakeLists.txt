@@ -11,13 +11,13 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 add_executable(TradingEngine_tests
-        TestSupport.h
-        Types_tests.cpp
-        PriceLevel_tests.cpp
-        PriceLadder_tests.cpp
-        OrderBook_tests.cpp
-        Util_tests.cpp
-        Differential_tests.cpp
+        support/test_support.hpp
+        unit/types_test.cpp
+        unit/price_level_test.cpp
+        unit/price_ladder_test.cpp
+        unit/order_book_test.cpp
+        unit/util_test.cpp
+        differential/differential_test.cpp
 )
 
 target_link_libraries(TradingEngine_tests
@@ -25,6 +25,8 @@ target_link_libraries(TradingEngine_tests
         TradingEngine
         GTest::gtest_main
 )
+
+target_include_directories(TradingEngine_tests PRIVATE support)
 
 include(GoogleTest)
 gtest_discover_tests(TradingEngine_tests)

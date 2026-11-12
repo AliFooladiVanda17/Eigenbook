@@ -8,7 +8,7 @@ include(GNUInstallDirs)
 include(CTest)
 
 add_subdirectory(src)
-add_subdirectory(app)
+add_subdirectory(apps/demo)
 
 # Enable test build only when the BUILD_TESTING is ON
 if (BUILD_TESTING)
@@ -24,7 +24,7 @@ write_basic_package_version_file(
 )
 
 configure_package_config_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/TradingEngineConfig.cmake.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EigenbookConfig.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/TradingEngineConfig.cmake
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/TradingEngine
 )

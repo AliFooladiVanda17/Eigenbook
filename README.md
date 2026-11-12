@@ -227,7 +227,7 @@ pinning, no percentiles). A proper benchmark harness is on the roadmap.*
 
 ### System flow
 
-![System layers](layers.png)
+![System layers](docs/images/layers.png)
 
 ### Core principles
 

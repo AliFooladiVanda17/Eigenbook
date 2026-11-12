@@ -11,8 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
-#include <tradingengine/order.h>
-#include <tradingengine/types.h>
+#include <eigenbook/core/order.hpp>
+#include <eigenbook/core/types.hpp>
 
 // OrderId -> Order* for O(1) cancel / modify.
 //

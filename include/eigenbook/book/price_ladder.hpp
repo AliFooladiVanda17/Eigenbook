@@ -13,10 +13,10 @@
 #include <memory>
 #include <memory_resource>
 #include <optional>
-#include <tradingengine/PriceLevel.h>
-#include <tradingengine/order.h>
-#include <tradingengine/types.h>
-#include <tradingengine/util/LevelBitmap.h>
+#include <eigenbook/book/price_level.hpp>
+#include <eigenbook/core/order.hpp>
+#include <eigenbook/core/types.hpp>
+#include <eigenbook/util/level_bitmap.hpp>
 
 // Price ordering of one side of the book: "better" is higher for bids, lower for asks.
 template <OrderSide Side>

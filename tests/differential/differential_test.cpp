@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "TestSupport.h"
+#include "test_support.hpp"
 
 namespace {
 

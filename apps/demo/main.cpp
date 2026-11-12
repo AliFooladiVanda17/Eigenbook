@@ -4,7 +4,7 @@
 #include <random>
 #include <vector>
 
-#include <tradingengine/orderbook.h>
+#include <eigenbook/book/order_book.hpp>
 
 namespace {
 

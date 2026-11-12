@@ -9,7 +9,7 @@
 #include <memory>
 #include <vector>
 
-#include <tradingengine/orderbook.h>
+#include <eigenbook/book/order_book.hpp>
 
 inline constexpr InstrumentId kInstrument{7};
 

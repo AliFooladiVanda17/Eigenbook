@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-#include "TestSupport.h"
+#include "test_support.hpp"
 
 namespace {
 

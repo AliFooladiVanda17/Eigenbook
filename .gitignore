@@ -48,13 +48,8 @@ compile_commands.json
 # VS Code: per-user settings
 .vscode/
 
-# CLion / JetBrains: shared project settings stay tracked, per-user files do not
-.idea/workspace.xml
-.idea/usage.statistics.xml
-.idea/shelf/
-.idea/tasks.xml
-.idea/dictionaries/
-.idea/httpRequests/
+# CLion / JetBrains (not tracked; each developer keeps their own project settings)
+.idea/
 
 # Visual Studio
 .vs/

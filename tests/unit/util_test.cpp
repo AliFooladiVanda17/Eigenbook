@@ -10,9 +10,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <tradingengine/OrderIndex.h>
-#include <tradingengine/util/LevelBitmap.h>
-#include <tradingengine/util/ObjectPool.h>
+#include <eigenbook/book/locator/hash_order_index.hpp>
+#include <eigenbook/util/level_bitmap.hpp>
+#include <eigenbook/util/object_pool.hpp>
 
 TEST(LevelBitmap, FindNextAndPrevMatchReferenceSet) {
     constexpr std::size_t kBits = 70'000; // spans several summary words, ragged tail

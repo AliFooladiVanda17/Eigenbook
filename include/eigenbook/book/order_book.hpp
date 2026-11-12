@@ -10,12 +10,12 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
-#include <tradingengine/OrderIndex.h>
-#include <tradingengine/PriceLadder.h>
-#include <tradingengine/PriceLevel.h>
-#include <tradingengine/order.h>
-#include <tradingengine/types.h>
-#include <tradingengine/util/ObjectPool.h>
+#include <eigenbook/book/locator/hash_order_index.hpp>
+#include <eigenbook/book/price_ladder.hpp>
+#include <eigenbook/book/price_level.hpp>
+#include <eigenbook/core/order.hpp>
+#include <eigenbook/core/types.hpp>
+#include <eigenbook/util/object_pool.hpp>
 
 enum class RejectReason : std::uint8_t {
     INVALID_QUANTITY,   // zero quantity

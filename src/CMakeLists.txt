@@ -1,15 +1,15 @@
 add_library(TradingEngine STATIC
         engine/TradingEngine.cpp
         ../include/tradingengine/TradingEngine.h
-        ../include/tradingengine/types.h
-        ../include/tradingengine/order.h
+        ../include/eigenbook/core/types.hpp
+        ../include/eigenbook/core/order.hpp
         book/orderbook.cpp
-        ../include/tradingengine/orderbook.h
-        ../include/tradingengine/OrderIndex.h
-        ../include/tradingengine/PriceLadder.h
-        ../include/tradingengine/PriceLevel.h
-        ../include/tradingengine/util/LevelBitmap.h
-        ../include/tradingengine/util/ObjectPool.h
+        ../include/eigenbook/book/order_book.hpp
+        ../include/eigenbook/book/locator/hash_order_index.hpp
+        ../include/eigenbook/book/price_ladder.hpp
+        ../include/eigenbook/book/price_level.hpp
+        ../include/eigenbook/util/level_bitmap.hpp
+        ../include/eigenbook/util/object_pool.hpp
 )
 
 target_include_directories(TradingEngine
