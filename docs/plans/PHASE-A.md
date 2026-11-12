@@ -1,6 +1,6 @@
 # Phase A: standard layout, latency harness, map-ladder tail, cancel-path tail
 
-Status: A0 done (recon); A1 steps 1–5 done; A2 next.
+Status: A0 done (recon); A1 done; A2 done (results provisional: unstable core clock); A3 next.
 
 ## A0 recon results
 
@@ -219,15 +219,74 @@ instantiation translation unit compiles, plus the `package_consumer` CTest test 
 requirement IDs: NFR-11 (consumable via `find_package(Eigenbook)`), NFR-12 (book target is
 header-only, no compiled library needed).
 
-## A2: latency harness (outline, refined before A2 starts)
+## A2: latency harness
 
-Files: `include/eigenbook/platform/{tsc,cpu_info,affinity}.hpp`, `src/platform/{tsc,cpu_info,
-affinity}_{win,linux}.cpp` → `Eigenbook::platform`; `bench/harness/{timer,histogram,
-environment}.hpp`; `bench/workloads/{w1_baseline,w2_level_churn,w3_cancel_heavy,
-w4_adversarial_index,w5_microburst}.hpp`; `bench/latency/main.cpp` → `eigenbook_latency`;
-`tests/alloc/zero_alloc_test.cpp` (replaced global `operator new/delete`); `docs/BENCHMARKS.md`.
+### File-by-file
 
-Risks / limits known now:
+**Library (small, additive changes)**
+
+| File | Change |
+|---|---|
+| `include/eigenbook/book/locator/hash_order_index.hpp` | `static capacityFor(expected)` (single source of the sizing rule, used by `reserve` and by W4), public `static hash(key)` (the mixer W4 inverts), cold-path `capacity()` and `maxClusterLength()`; probe/shift statistics compiled in only under `EIGENBOOK_INSTRUMENT_INDEX` |
+
+**Platform module: `Eigenbook::platform` (STATIC, namespace `eigenbook::platform`)**
+
+| File | Content |
+|---|---|
+| `include/eigenbook/platform/tsc.hpp` | Inline `tscStart()` (`lfence; rdtsc`), `tscStop()` (`rdtscp; lfence`); `calibrateTsc(duration)` against `steady_clock` |
+| `include/eigenbook/platform/cpu_info.hpp` | `CpuInfo` (vendor, brand, invariant TSC = CPUID 0x80000007 EDX[8], hybrid = CPUID 7 EDX[15]), `currentCoreType()` (CPUID 0x1A EAX[31:24]: 0x40 Core/P, 0x20 Atom/E) |
+| `include/eigenbook/platform/affinity.hpp` | `logicalCpuCount`, `currentCpu`, `pinCurrentThread(cpu)`, `raiseThreadPriority(fifo)`, `enumerateCpus()` (pins to each CPU and reads its core type; on Windows also `EfficiencyClass` from `GetSystemCpuSetInformation`) |
+| `include/eigenbook/platform/system_info.hpp` | OS version, power plan / governor, large-page availability, `prefault(ptr, bytes)` |
+| `src/platform/cpu_x86.cpp`, `src/platform/tsc.cpp` | Portable x86-64 parts (MSVC `<intrin.h>`, GCC/Clang `<cpuid.h>`/`<x86intrin.h>`) |
+| `src/platform/windows/{affinity,system_info}.cpp` | `SetThreadAffinityMask`, `SetThreadPriority(TIME_CRITICAL)` + `HIGH_PRIORITY_CLASS`, `GetCurrentProcessorNumberEx`, `RtlGetVersion`, `PowerGetActiveScheme`, `SeLockMemoryPrivilege` check |
+| `src/platform/linux/{affinity,system_info}.cpp` | `pthread_setaffinity_np`, optional `SCHED_FIFO`, `sched_getcpu`, `uname`, `scaling_governor`, `/proc/meminfo` huge pages |
+
+**Bench (`bench/`, not installed)**
+
+| File | Content |
+|---|---|
+| `bench/CMakeLists.txt` | `eigenbook_bench_support` INTERFACE (harness + workloads headers); executables only if `EIGENBOOK_BUILD_BENCH` |
+| `bench/harness/histogram.hpp` | Log-linear histogram: exact below 2048, then 1024 sub-buckets per power of two (relative error ≤ 2⁻¹⁰, i.e. 3 significant digits), fixed array, `record()` is `noexcept` and never allocates; exact count/sum/min/max; percentile = highest value equivalent to the bucket (conservative) |
+| `bench/harness/op_class.hpp` | Op classes: add-passive, add-aggressive (1, 2–4, ≥5 fills), cancel-hit (any/front/middle/back), cancel-miss, modify-in-place, modify-reenter |
+| `bench/harness/environment.hpp` | Collects and prints CPU, core id/type, OS, power plan, compiler, flags, build type, git SHA |
+| `bench/workloads/workload.hpp` | `Op` (flat 40-byte record), `Workload` (ops, warm-up count, price range, peak live orders), a shadow map book used during generation to keep the live set correct on fills and to tag each op's expected class |
+| `bench/workloads/{w1_baseline,w2_level_churn,w3_cancel_heavy,w4_adversarial_index,w5_microburst}.hpp` | Seeded generators (parameters below) |
+| `bench/latency/main.cpp` | `eigenbook_latency` (and `eigenbook_latency_instrumented` with `EIGENBOOK_INSTRUMENT_INDEX`): pins, calibrates, measures timer overhead, runs every workload × book × seed, prints tables, writes CSV |
+| `bench/results/` | `summary.csv`, `distribution_<workload>_<book>.csv`, `environment.txt` (committed only when the owner decides) |
+| `bench/micro/` | **Not created**: Google Benchmark cannot be fetched here and its commit SHA cannot be verified offline |
+
+**Tests**
+
+| File | Covers |
+|---|---|
+| `tests/unit/histogram_test.cpp` | Percentiles within 0.1 % of exact (sorted reference), exact min/max/count/mean, no allocation while recording |
+| `tests/unit/workload_test.cpp` | Same seed ⇒ identical op stream; every non-miss cancel hits a live order; replaying a workload on both books reproduces the generator's expected classes; `unmix(hash(x)) == x`; W4 ids share one home slot |
+| `tests/unit/platform_test.cpp` | CPU info sane, TSC calibration plausible and stable, pin + `currentCpu` agree, CPU enumeration covers every logical CPU |
+| `tests/alloc/zero_alloc_test.cpp` | Separate binary with counting global `operator new/delete`: zero allocations in the measured part of every workload, both books (executable proof of NFR-02) |
+| `tests/unit/index_instrumentation_test.cpp` | Separate binary built with `EIGENBOOK_INSTRUMENT_INDEX`: probe and shift histograms count what they should |
+
+### Workload parameters (defaults; all are fields of a config struct)
+
+| Workload | Shape |
+|---|---|
+| W1 baseline | Exactly the demo's generator (seed 42 for run 0), 2,000,000 ops, first 200,000 untimed. The demo-style whole-loop mean is printed beside the percentiles for continuity |
+| W2 level churn | Mid 100,000; passive bids in [mid−H, mid−1], asks in [mid+1, mid+H], H = 1000; 10 % aggressive; each resting order cancelled after a geometric lifetime (mean 64 ops). Variant W2-drift: mid +1 tick every 100 ops, H = 4000, 2 % long-lived orders left behind (long gaps for the dense ladder). Measured churn = (levels created + destroyed) / op |
+| W3 cancel-heavy | 20 levels × 50 orders per side; timed ops 70 % (W3-70) or 90 % (W3-90) cancels at front/middle/back (equal thirds), remainder passive adds; each timed op paired with an untimed op that restores the level size; 2 % cancel-miss stream |
+| W4 adversarial index | W4-collide: C = 4096 ids built by inverting the mixer so they share one home slot; timed cancels/adds of colliding ids, each paired with an untimed op keeping C constant. W4-load: index at load 1/2 (capacity/2 − 1 live, sequential ids), timed cancel + untimed add pairs |
+| W5 microbursts | Hawkes arrivals (Ogata thinning; branching ratio 0.8, decay 20 µs, mean rate 500 k ops/s), 45 % passive add, 10 % aggressive add, 45 % cancel of a live order. Open-loop: the harness waits until each op's scheduled time; service time and response time (from the scheduled time, coordinated-omission correct) are reported separately |
+
+Every workload: ≥ 200,000 warm-up ops, then 1,000,000 measured ops (`--quick`: 100,000 measured, 2 runs);
+5 runs with seeds base … base+4; report the median of each percentile and the min–max spread.
+
+### Test plan / acceptance
+
+All existing tests plus the new ones pass in msvc-debug, msvc-release, dev-release (Clang),
+asan-ubsan, msvc-asan. The zero-allocation test passes for both books on every workload, or the
+failure is reported as a finding (it is the executable form of NFR-02; a map-ladder failure under
+level churn is the A3 hypothesis). The harness refuses to print nanoseconds without an invariant
+TSC. New requirement IDs NFR-13 … NFR-17.
+
+### Risks / limits known now
 - Hybrid CPU: CPUID leaf 0x1A reports the type of the core the instruction runs on, so detection
   pins to each logical CPU in turn. Windows also exposes `EfficiencyClass` via
   `GetSystemCpuSetInformation`; both are checked and must agree.
@@ -236,8 +295,42 @@ Risks / limits known now:
 - Windows large pages need `SeLockMemoryPrivilege`; without it `--prefault` touches pages only.
 - Linux paths (`pthread_setaffinity_np`, `SCHED_FIFO`, `MAP_POPULATE`, `MADV_HUGEPAGE`) compile
   only where a Linux toolchain exists; they cannot be run or measured here.
-- Google Benchmark (bench/micro) cannot be fetched in this environment. bench/micro is wired but
-  only built when the dependency is available; the latency harness does not depend on it.
+- Google Benchmark (bench/micro) cannot be fetched in this environment (GitHub unreachable even
+  outside the sandbox), and pinning needs a verified commit SHA, so bench/micro is not created in
+  A2. The latency harness does not depend on it.
+
+### As built (A2)
+
+Deviations from the plan above, and things found while doing it:
+
+- **Zero-allocation test needed a second counting path.** A control test (map ladder grows to
+  10,000 new levels inside the counted window) counted **zero** allocations with only
+  `operator new` replaced: with MSVC's STL in the DLL runtime (`/MD`), the `std::pmr` resources
+  live inside the STL DLL and their `operator new` calls do not reach a replacement defined in
+  the test executable. The test now also installs a counting `std::pmr` default resource (the
+  map ladder's pool takes its upstream from it), and the control passes.
+- **NFR-02 is violated by the map ladder** in W2-drift: new highs in the number of live price
+  levels make its pool fetch chunks from upstream during the measured part (1 allocation in the
+  test's 200,000 measured ops; 2–3 per 1,000,000 in the benchmark). Recorded as a known violation
+  that the test asserts still happens (so the A3 fix must remove the entry); NFR-02 is Partial.
+  The dense ladder: zero allocations in every workload.
+- **Clock instability.** The machine ran on battery with the Balanced plan; the empty-timer
+  overhead took three values (≈ 29, 55, 97 TSC ticks) between runs. Added: power source in the
+  environment report, an end-of-session clock check, and a **per-run clock probe** (empty-timer
+  p50 just before each measured loop) in the tables and CSV. Published numbers are marked
+  provisional until re-run on AC with a performance power plan (owner's decision).
+- Raw values are labelled **TSC ticks**, not cycles (the TSC runs at a fixed rate).
+- The harness counts **pmr upstream allocations** per run (forwarding counter installed as the
+  pmr default resource; one extra virtual call on the rare upstream path) so A3 can relate the
+  map tail to allocations.
+- `w4-collide` measures 100,000 ops per run (each op walks a 4096-slot cluster), not 1,000,000.
+- **Modify is not exercised** by any workload (none of W1–W5 specifies it); the classes exist and
+  get data when B1 reworks modify.
+- `OrderIndex::find/insert/erase/reserve` compile to identical `clang -O2` assembly before and
+  after the instrumentation macro was added (checked once). A first version that restructured
+  the loops did not, and was replaced.
+- `bench/micro/` not created (no Google Benchmark, see above).
+- Linux implementations (`src/platform/linux/*`) written but never compiled.
 
 ## A3: map-ladder tail (outline)
 

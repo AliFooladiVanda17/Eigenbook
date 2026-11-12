@@ -61,7 +61,10 @@ These are tracked in [docs/plans/PHASE-A.md](docs/plans/PHASE-A.md) and fixed in
 named there. Until then, do not expose the book to untrusted input.
 
 - Resting an order can allocate (and throw `std::bad_alloc`) when the pool, the order index or
-  the map ladder's node pool has to grow beyond what was reserved at construction.
+  the map ladder's node pool has to grow beyond what was reserved at construction. The
+  zero-allocation test shows the map ladder doing this after warm-up whenever the number of live
+  price levels reaches a new high (workload W2-drift); the dense ladder did not allocate in any
+  workload.
 - A modify that re-enters the order removes the original first; if re-insertion throws, the
   order is lost.
 - No ownership check: any caller can cancel or modify any order id. No self-trade prevention,
@@ -144,6 +147,7 @@ Run the demo:
 |---|---|---|
 | `EIGENBOOK_BUILD_TESTS` | ON if top-level | Build the test suite (downloads GoogleTest) |
 | `EIGENBOOK_BUILD_APPS` | ON if top-level | Build `apps/` |
+| `EIGENBOOK_BUILD_BENCH` | ON if top-level | Build `bench/` (`eigenbook_latency`) |
 | `EIGENBOOK_INSTALL` | ON if top-level | Generate install and package-export rules |
 | `EIGENBOOK_WARNINGS_AS_ERRORS` | OFF | `-Werror` / `/WX` for our own targets |
 | `EIGENBOOK_SANITIZE` | empty | `address;undefined`, `thread`, or `address` (MSVC) |
@@ -176,7 +180,8 @@ project.
 
 | Target | Contents |
 |---|---|
-| `Eigenbook::book` | The header-only order book (`include/eigenbook/`) |
+| `Eigenbook::book` | The header-only order book (`include/eigenbook/{core,book,util}`) |
+| `Eigenbook::platform` | Static library: TSC, CPU / core-type detection, thread pinning, OS facts (`include/eigenbook/platform`; Windows and Linux) |
 | `Eigenbook::eigenbook` | Umbrella: every public Eigenbook library |
 
 ---
@@ -254,24 +259,34 @@ ctest --preset dev-debug          # or msvc-debug, asan-ubsan, msvc-asan, ...
 | [tests/unit/order_book_test.cpp](tests/unit/order_book_test.cpp) | Matching, cancel and modify, on both book types |
 | [tests/unit/util_test.cpp](tests/unit/util_test.cpp) | `LevelBitmap`, `OrderIndex`, `ObjectPool` |
 | [tests/unit/instantiation_test.cpp](tests/unit/instantiation_test.cpp) | Compiles every member of both books (no test cases) |
+| [tests/unit/histogram_test.cpp](tests/unit/histogram_test.cpp) | Benchmark histogram accuracy against an exact reference |
+| [tests/unit/workload_test.cpp](tests/unit/workload_test.cpp) | Benchmark workloads: determinism, predicted outcomes on both books |
+| [tests/unit/platform_test.cpp](tests/unit/platform_test.cpp) | CPU detection, TSC calibration, pinning, CPU choice |
 | [tests/differential/differential_test.cpp](tests/differential/differential_test.cpp) | 20 000 random operations: map ladder vs dense ladder vs a reference model |
+| [tests/alloc/zero_alloc_test.cpp](tests/alloc/zero_alloc_test.cpp) | Separate binary with counting `operator new` and pmr default resource: zero allocations in the measured part of every workload |
+| [tests/unit/index_instrumentation_test.cpp](tests/unit/index_instrumentation_test.cpp) | Separate binary built with `EIGENBOOK_INSTRUMENT_INDEX`: index probe statistics |
 | [tests/package_consumer/](tests/package_consumer/) | CTest `package_consumer`: installs the build and builds a separate project against it with `find_package(Eigenbook)` |
 
-The suite has 94 GoogleTest cases plus the `package_consumer` test. Each test is mapped to a
-requirement in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+`ctest` runs 124 GoogleTest cases in three executables plus the `package_consumer` test. Each
+test is mapped to a requirement in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ---
 
 ## Benchmarks
 
-There are no published numbers yet. `eigenbook_demo` replays 2 000 000 synthetic operations
-and prints the mean time per operation over the whole loop. That number mixes adds, aggressive
-orders and cancels (about a fifth of which miss), is taken without CPU pinning, and says nothing
-about tail latency, so it is not quoted here.
+Results, method and environment: **[docs/BENCHMARKS.md](docs/BENCHMARKS.md)**.
 
-A per-operation latency harness (TSC timing, percentiles up to p99.99, pinned to a performance
-core, several seeded workloads, zero-allocation proof) is being built in Phase A2. Results,
-method and environment will be in `docs/BENCHMARKS.md`.
+`eigenbook_latency` times every operation separately (serialised TSC reads, pinned to a P-core),
+records it in the histogram of its class (passive add, aggressive add by number of fills,
+cancel hit by queue position, cancel miss, modify) and reports p50 … p99.99 and max per class,
+over five seeded runs, for eight workloads and both ladders:
+
+```bash
+cmake --preset bench && cmake --build --preset bench
+./build/bench/bench/latency/eigenbook_latency   # --quick for a short run; options: top of bench/latency/main.cpp
+```
+
+`eigenbook_demo` still prints its old whole-loop mean; it is a usage example, not a benchmark.
 
 ---
 
@@ -295,17 +310,25 @@ Eigenbook/
 │   ├── book/                 order_book.hpp, price_level.hpp, price_ladder.hpp (concept)
 │   │   ├── ladder/           map_ladder.hpp, dense_ladder.hpp
 │   │   └── locator/          hash_order_index.hpp
-│   └── util/                 level_bitmap.hpp, object_pool.hpp
-├── src/                      Library target definitions (compiled sources arrive with the platform module)
-├── apps/demo/                Small usage example and throughput demo
+│   ├── util/                 level_bitmap.hpp, object_pool.hpp
+│   └── platform/             tsc.hpp, cpu_info.hpp, affinity.hpp, system_info.hpp
+├── src/                      Library targets; platform/ (portable, windows/, linux/)
+├── apps/demo/                Small usage example
+├── bench/
+│   ├── harness/              Histogram, op classes, executor, environment report
+│   ├── workloads/            Seeded generators W1–W5
+│   ├── latency/              eigenbook_latency
+│   └── results/              CSV + environment of published runs
 ├── tests/
 │   ├── support/              Shared test helpers
 │   ├── unit/                 One file per component
 │   ├── differential/         Ladders vs reference model
+│   ├── alloc/                Zero-allocation test binary
 │   └── package_consumer/     find_package(Eigenbook) smoke project
 └── docs/
     ├── REQUIREMENTS.md       Requirements and test traceability
     ├── ARCHITECTURE.md       Design
+    ├── BENCHMARKS.md         Method, environment, results
     ├── adr/                  Architecture decision records
     ├── plans/                Per-phase plans
     └── images/
@@ -319,7 +342,7 @@ Detailed plans live in [docs/plans/](docs/plans/).
 
 **Phase A: layout and measurement**
 - [x] Standard layout, namespace, header-only target, presets, install/export
-- [ ] Latency harness: TSC timer, log-linear histograms, CPU pinning, seeded workloads,
+- [x] Latency harness: TSC timer, log-linear histograms, CPU pinning, seeded workloads,
       zero-allocation test
 - [ ] Map-ladder tail: preallocated node resources, hybrid ladder
 - [ ] Cancel-path tail: direct order table with generation-checked handles, hardened hash index

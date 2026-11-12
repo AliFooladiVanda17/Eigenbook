@@ -9,6 +9,9 @@ add_executable(eigenbook_tests
         unit/order_book_test.cpp
         unit/util_test.cpp
         unit/instantiation_test.cpp
+        unit/histogram_test.cpp
+        unit/workload_test.cpp
+        unit/platform_test.cpp
         differential/differential_test.cpp
 )
 
@@ -17,20 +20,34 @@ target_include_directories(eigenbook_tests PRIVATE support)
 target_link_libraries(eigenbook_tests
         PRIVATE
         Eigenbook::book
+        Eigenbook::platform
+        eigenbook_bench_support
         eigenbook_warnings
         GTest::gtest_main
 )
 
-eigenbook_copy_sanitizer_runtime(eigenbook_tests)
+# Zero-allocation proof (NFR-02): its own executable, because it replaces global operator new.
+add_executable(eigenbook_alloc_tests alloc/zero_alloc_test.cpp)
+target_link_libraries(eigenbook_alloc_tests PRIVATE eigenbook_bench_support eigenbook_warnings GTest::gtest_main)
+
+# Index probe statistics: its own executable, because EIGENBOOK_INSTRUMENT_INDEX changes
+# OrderIndex's layout (mixing it with uninstrumented translation units would violate the ODR).
+add_executable(eigenbook_index_instrumentation_tests unit/index_instrumentation_test.cpp)
+target_compile_definitions(eigenbook_index_instrumentation_tests PRIVATE EIGENBOOK_INSTRUMENT_INDEX)
+target_link_libraries(eigenbook_index_instrumentation_tests
+        PRIVATE eigenbook_bench_support eigenbook_warnings GTest::gtest_main)
 
 # The first launch of a freshly linked test binary sometimes took over 5 s on Windows (observed
 # as "Process terminated due to timeout" in --gtest_list_tests; later launches take ~0.1 s), so
 # the default 5 s discovery timeout is raised. PRE_TEST lists the tests when ctest runs, so a slow
 # discovery can no longer fail the build itself.
-gtest_discover_tests(eigenbook_tests
-        DISCOVERY_MODE PRE_TEST
-        DISCOVERY_TIMEOUT 60
-)
+foreach (target eigenbook_tests eigenbook_alloc_tests eigenbook_index_instrumentation_tests)
+    eigenbook_copy_sanitizer_runtime(${target})
+    gtest_discover_tests(${target}
+            DISCOVERY_MODE PRE_TEST
+            DISCOVERY_TIMEOUT 60
+    )
+endforeach ()
 
 # Installs this build into a scratch prefix, then configures, builds and runs
 # tests/package_consumer against it with find_package(Eigenbook).

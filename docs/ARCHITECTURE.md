@@ -104,6 +104,10 @@ A hybrid ladder (dense window around the touch, sparse overflow) is planned in P
 - `Eigenbook::book`: header-only `INTERFACE` target with a `FILE_SET HEADERS`
   ([ADR 0001](adr/0001-header-only-book-target.md)).
 - `Eigenbook::eigenbook`: umbrella over all public libraries.
-- `Eigenbook::platform` (planned, Phase A2): the only compiled library: TSC, CPU detection,
-  affinity, with Windows and Linux implementations.
+- `Eigenbook::platform`: the only compiled library (namespace `eigenbook::platform`): TSC
+  reads and calibration, CPUID, thread pinning and priority, OS facts. Portable parts in
+  `src/platform/`, OS parts in `src/platform/windows/` and `src/platform/linux/`. Used by the
+  benchmarks now and by the engine later; the book itself does not depend on it.
+- `bench/` (not installed): latency harness and seeded workloads, see
+  [BENCHMARKS.md](BENCHMARKS.md).
 - File layout and naming: [ADR 0002](adr/0002-file-layout-and-naming.md).

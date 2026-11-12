@@ -126,6 +126,10 @@ public:
 
     [[nodiscard]] bool empty() const noexcept { return index.empty(); }
 
+    // Read-only view of the order index, for diagnostics and benchmarks (cluster length, and probe
+    // statistics in EIGENBOOK_INSTRUMENT_INDEX builds). Not part of the matching interface.
+    [[nodiscard]] const OrderIndex& orderIndex() const noexcept { return index; }
+
 private:
     // Fills `quantity` of an incoming order against the side opposite to TakerSide; returns what
     // is left unfilled.

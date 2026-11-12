@@ -10,6 +10,19 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- `Eigenbook::platform` (static library, Windows and Linux implementations): serialised TSC
+  reads and calibration, CPUID identification (invariant TSC, hybrid core type), thread pinning
+  and priority, CPU enumeration and benchmark-CPU choice, OS / power-policy facts, pre-faulting.
+- Latency harness `eigenbook_latency` (`bench/`): per-operation TSC timing, log-linear histogram
+  (3 significant digits), per-class percentiles, five seeded workloads W1–W5 (eight variants),
+  open-loop pacing for W5, CSV output; `eigenbook_latency_instrumented` with index probe
+  statistics. Option `EIGENBOOK_BUILD_BENCH`. Results in `docs/BENCHMARKS.md`.
+- `OrderIndex::capacityFor`, `OrderIndex::hash`, `capacity()`, `maxClusterLength()`, and probe /
+  shift statistics behind `EIGENBOOK_INSTRUMENT_INDEX` (compiled out by default; identical code
+  for the default build). `BasicOrderBook::orderIndex()` read-only accessor for diagnostics.
+- Zero-allocation test binary (`tests/alloc`), histogram, workload and platform tests,
+  index-instrumentation test binary. Requirements NFR-13 … NFR-17.
+
 - CMake package `Eigenbook` with targets `Eigenbook::book` (header-only) and
   `Eigenbook::eigenbook` (umbrella), consumable with `find_package(Eigenbook CONFIG)` or
   `add_subdirectory`.

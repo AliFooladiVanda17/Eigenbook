@@ -16,6 +16,7 @@ project(Eigenbook
 # that uses add_subdirectory / FetchContent gets the library and nothing else.
 option(EIGENBOOK_BUILD_TESTS "Build the test suite" ${PROJECT_IS_TOP_LEVEL})
 option(EIGENBOOK_BUILD_APPS "Build the example applications in apps/" ${PROJECT_IS_TOP_LEVEL})
+option(EIGENBOOK_BUILD_BENCH "Build the benchmarks in bench/" ${PROJECT_IS_TOP_LEVEL})
 option(EIGENBOOK_INSTALL "Generate install and package export rules" ${PROJECT_IS_TOP_LEVEL})
 option(EIGENBOOK_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 set(EIGENBOOK_SANITIZE "" CACHE STRING
@@ -29,6 +30,11 @@ add_subdirectory(src)
 
 if (EIGENBOOK_BUILD_APPS)
     add_subdirectory(apps/demo)
+endif ()
+
+# The bench support library (harness + workloads) is also used by the tests.
+if (EIGENBOOK_BUILD_BENCH OR EIGENBOOK_BUILD_TESTS)
+    add_subdirectory(bench)
 endif ()
 
 if (EIGENBOOK_BUILD_TESTS)

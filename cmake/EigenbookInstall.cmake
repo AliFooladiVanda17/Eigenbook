@@ -1,8 +1,8 @@
-# Install and package export: find_package(Eigenbook CONFIG) provides Eigenbook::book and
-# Eigenbook::eigenbook.
+# Install and package export: find_package(Eigenbook CONFIG) provides Eigenbook::book,
+# Eigenbook::platform and Eigenbook::eigenbook.
 #
-# The package config goes to <libdir>/cmake/Eigenbook and is not marked arch-independent, because
-# Eigenbook::platform (a static library) joins the package in Phase A2.
+# The package config goes to <libdir>/cmake/Eigenbook (not arch-independent: Eigenbook::platform
+# is a compiled static library).
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -10,8 +10,9 @@ include(CMakePackageConfigHelpers)
 set(EIGENBOOK_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/Eigenbook"
     CACHE STRING "Install directory for the Eigenbook CMake package files")
 
-install(TARGETS eigenbook_book eigenbook
+install(TARGETS eigenbook_book eigenbook_platform eigenbook
         EXPORT EigenbookTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 

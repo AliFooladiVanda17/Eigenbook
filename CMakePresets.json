@@ -92,6 +92,7 @@
       "inherits": "ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "EIGENBOOK_BUILD_BENCH": "ON",
         "EIGENBOOK_BUILD_TESTS": "OFF",
         "EIGENBOOK_INSTALL": "OFF"
       }

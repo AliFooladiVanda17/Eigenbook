@@ -101,15 +101,19 @@ IncludeBlocks: Regroup
 # Groups, in this order, separated by a blank line:
 #   1. C++ standard library        <vector>, <memory_resource>
 #   2. other system / third party  <gtest/gtest.h>, <intrin.h>, <windows.h>
-#   3. Eigenbook public headers    <eigenbook/...>
-#   4. local headers               "test_support.hpp"
+#   3. benchmark support headers   <harness/...>, <workloads/...>, generated eigenbook_bench_*
+#   4. Eigenbook public headers    <eigenbook/...>
+#   5. local headers               "test_support.hpp"
 # The first matching regex wins, so the specific patterns come first.
 IncludeCategories:
   - Regex: '^<eigenbook/'
+    Priority: 4
+
+  - Regex: '^<(harness|workloads)/|^<eigenbook_bench_'
     Priority: 3
 
   - Regex: '^"'
-    Priority: 4
+    Priority: 5
 
   - Regex: '^<[a-z_0-9]+>$'
     Priority: 1

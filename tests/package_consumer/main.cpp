@@ -4,7 +4,20 @@
 
 #include <eigenbook/book/order_book.hpp>
 
+#if defined(EIGENBOOK_CONSUMER_PLATFORM)
+#include <eigenbook/platform/affinity.hpp>
+#include <eigenbook/platform/cpu_info.hpp>
+#endif
+
 int main() {
+#if defined(EIGENBOOK_CONSUMER_PLATFORM)
+    // Linked through Eigenbook::eigenbook: the compiled platform library must resolve.
+    if (eigenbook::platform::logicalCpuCount() == 0) {
+        std::puts("package_consumer: platform library returned no CPUs");
+        return 1;
+    }
+    (void)eigenbook::platform::cpuInfo();
+#endif
     using namespace eigenbook;
 
     OrderBook book(InstrumentId{1});

@@ -30,9 +30,12 @@ Status values: **Done** (implemented and tested), **Partial**, **Planned**.
 | Dependency | Version | Scope | How it is obtained |
 |---|---|---|---|
 | C++ standard library | C++23 | Library | Shipped with the compiler |
+| Operating-system libraries | – | `Eigenbook::platform` | Windows: `powrprof` (power plan name); Linux: `Threads::Threads` |
 | [GoogleTest](https://github.com/google/googletest) | 1.15.2 (commit `b514bdc898e2951020cbdca1304b75f5950d1f59`) | Tests only | CMake `FetchContent`, pinned by SHA in `cmake/Dependencies.cmake`; offline via `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` |
 
-The library itself has **no third-party runtime dependencies**.
+The libraries have **no third-party runtime dependencies**. Google Benchmark (planned for
+`bench/micro`) is not used yet: it could not be fetched, nor its commit SHA verified, in the
+environment Phase A2 was built in.
 
 ### 1.3 Platforms
 
@@ -116,7 +119,7 @@ The library itself has **no third-party runtime dependencies**.
 | ID | Category | Requirement | Status | Verified by |
 |---|---|---|---|---|
 | NFR-01 | Performance | Cancel and modify MUST locate the order in O(1) through the order index. | Done | Design; `OrderIndex.MatchesUnorderedMapUnderChurn` |
-| NFR-02 | Performance | Matching MUST NOT allocate memory; resting orders come from a pre-reserved pool. | Done | Design; `ObjectPool.RecyclesSlotsWithoutGrowing` |
+| NFR-02 | Performance | Matching MUST NOT allocate memory; resting orders come from a pre-reserved pool. After warm-up, no operation of a book sized for its peak load may allocate. | Partial | `ZeroAllocation.DenseBookMeasuredPartOfEveryWorkload` (0 allocations in all 8 workloads); `ZeroAllocation.MapBookMeasuredPartOfEveryWorkload` (0 in 7 workloads; **known violation: map ladder in W2-drift**, where new peaks in the number of live levels make the pmr node pool fetch from upstream; fix planned in A3); controls `ZeroAllocation.CountingAllocatorSeesAllocations`, `ZeroAllocation.MapLadderGrowthIsCounted`; `ObjectPool.RecyclesSlotsWithoutGrowing`. Beyond the reserved order count, the pool and index still grow (B1: hard limits). |
 | NFR-03 | Performance | An `Order` node MUST occupy exactly one 64-byte cache line. | Done | `static_assert` in `order.h`; `Order.OccupiesExactlyOneCacheLine` |
 | NFR-04 | Performance | Best bid / ask lookup MUST be O(1) for the dense ladder. | Done | Design |
 | NFR-05 | Concurrency | An order book MUST be mutated by a single thread and MUST NOT take locks on the hot path. | Done (book); Planned (engine) | Design |
@@ -125,8 +128,13 @@ The library itself has **no third-party runtime dependencies**.
 | NFR-08 | Error handling | Business rejections MUST be returned as values (`std::expected`), not thrown. | Done | `OrderBookTest.RejectsInvalidRequests` |
 | NFR-09 | Portability | The code MUST build without warnings under the `eigenbook_warnings` set (`/W4 /permissive- /Zc:__cplusplus`; `-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wold-style-cast`), except documented, locally scoped suppressions. | Done | Builds with `EIGENBOOK_WARNINGS_AS_ERRORS=ON` on MSVC 19.44 and Clang 21; the only suppression is C4324 in `object_pool.hpp` (intentional alignment padding, commented). GCC not yet tested. |
 | NFR-10 | Quality | Every functional requirement marked Done MUST be covered by at least one automated test. | Done | This document |
-| NFR-11 | Packaging | The library MUST be consumable from an install tree with `find_package(Eigenbook CONFIG)`, providing `Eigenbook::book` and `Eigenbook::eigenbook`. | Done | CTest `package_consumer` (installs the build, then configures, builds and runs `tests/package_consumer` against the install prefix only) |
+| NFR-11 | Packaging | The library MUST be consumable from an install tree with `find_package(Eigenbook CONFIG)`, providing `Eigenbook::book`, `Eigenbook::platform` and `Eigenbook::eigenbook`. | Done | CTest `package_consumer` (installs the build, then configures, builds and runs `tests/package_consumer` against the install prefix only; the umbrella executable calls into the compiled platform library) |
 | NFR-12 | Packaging | The order book MUST be header-only: using it MUST NOT require linking a compiled library. Every member of the supported book and ladder instantiations MUST still be compiled by the test build. | Done | `Eigenbook::book` is an `INTERFACE` target; `tests/unit/instantiation_test.cpp` explicitly instantiates `BasicOrderBook<MapPriceLadder>`, `BasicOrderBook<ArrayPriceLadder>`, both ladders on both sides, and `ObjectPool<Order>` |
+| NFR-13 | Measurement | Latency MUST be measured per operation with serialised TSC reads (`lfence; rdtsc` … `rdtscp; lfence`) and reported per operation class as percentiles (p50 … p99.99, max), never as one mixed mean. Nanoseconds MUST only be reported with an invariant TSC calibrated against `steady_clock` over ≥ 1 s; the empty-timer overhead MUST be reported. | Done | `eigenbook_latency` (design, see `docs/BENCHMARKS.md`); `Platform.TscCalibrationIsPlausibleAndStable`, `Platform.TscIsMonotonicOnOneCpu` |
+| NFR-14 | Measurement | The latency histogram MUST resolve values to 3 significant digits (relative bucket width ≤ 2⁻¹⁰), keep count, min, max and mean exact, and MUST NOT allocate while recording. | Done | `LatencyHistogram.*`; `ZeroAllocation.HistogramRecordDoesNotAllocate` |
+| NFR-15 | Measurement | Benchmark workloads MUST be deterministic for a given seed, and every operation's outcome (class and number of fills) MUST be predicted at generation time and reproduced by both book types, so the live-order set is correct on fills. | Done | `Workloads.SameSeedGivesTheSameStream`, `Workloads.ReplayOnBothBooksMatchesThePrediction`, `Workloads.CancelHeavyTargetsTheQueuePositionItClaims`, `Workloads.LevelChurnMeetsItsTarget`, `Workloads.CollidingIdsShareOneHomeSlotAndFormOneCluster`, `Workloads.MicroburstScheduleIsOrderedAndHasTheConfiguredMeanRate`, `Workloads.UnhashInvertsTheIndexHash`; the harness also counts outcome mismatches on every run |
+| NFR-16 | Platform | Platform code MUST be isolated in `Eigenbook::platform` with Windows and Linux implementations, and MUST pin a thread to a chosen logical CPU, report each CPU's core type on hybrid Intel CPUs, and choose a P-core away from CPU 0 for benchmarks. | Partial | `Platform.*` on Windows. The Linux implementation is written but has not been compiled or run (no Linux toolchain in the environment it was written in). |
+| NFR-17 | Measurement | Order-index probe statistics (find / insert / erase probe lengths, backward-shift scan and move counts) MUST be available behind `EIGENBOOK_INSTRUMENT_INDEX` and MUST NOT change the code of the default build. | Done | `IndexInstrumentation.*` (separate executable); `OrderIndex.MaxClusterLengthCountsTheLongestRunAcrossTheWrap`, `OrderIndex.CapacityForIsWhatReserveAllocates`; identical `clang -O2` assembly for `find`/`insert`/`erase`/`reserve` before and after the change (checked once, Phase A2) |
 
 ---
 
