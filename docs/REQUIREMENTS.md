@@ -38,8 +38,8 @@ The library itself has **no third-party runtime dependencies**.
 
 | Platform | Status |
 |---|---|
-| Windows 10/11 x64 (MSVC) | Built and tested |
-| Linux x86-64 (GCC / Clang) | Supported by the build; recommended for production (CPU affinity, NUMA) |
+| Windows 10/11 x64 (MSVC, Clang) | Built and tested (MSVC 19.44, Clang 21.1.8; Debug, Release, ASan, ASan+UBSan) |
+| Linux x86-64 (GCC / Clang) | Supported by the build, not yet tested; intended production platform (CPU affinity, NUMA) |
 | macOS (Apple Clang) | Expected to work; not tested |
 
 ---
@@ -136,4 +136,6 @@ When behaviour changes:
 
 1. Update or add the requirement here, keeping existing IDs stable (never reuse a retired ID).
 2. Add or update the tests listed in **Verified by**.
-3. Run the full test suite (`ctest --test-dir build --output-on-failure`) before committing.
+3. Run the full test suite before committing, in Debug, Release and a sanitizer preset where available
+   (e.g. `ctest --preset dev-debug`, `ctest --preset dev-release`, `ctest --preset asan-ubsan`; on
+   Windows `msvc-debug`, `msvc-release`, `msvc-asan`). See [CONTRIBUTING.md](../CONTRIBUTING.md).

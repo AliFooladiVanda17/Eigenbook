@@ -1,6 +1,6 @@
 # Phase A: standard layout, latency harness, map-ladder tail, cancel-path tail
 
-Status: A0 done (recon); A1 steps 1–4 done, step 5 next.
+Status: A0 done (recon); A1 steps 1–5 done; A2 next.
 
 ## A0 recon results
 
@@ -194,6 +194,13 @@ README rewritten so each statement is true (header-only, layout tree, presets, `
 `CONTRIBUTING.md`, `SECURITY.md` stub, `CHANGELOG.md` (Keep a Changelog), ADRs:
 `docs/adr/0001-header-only-book-target.md`, `0002-file-layout-and-naming.md`. **LICENSE: ask the
 owner before adding it.**
+
+As built: the README's design section moved to `docs/ARCHITECTURE.md`, with the complexity table
+corrected against the code (map ladder add at an existing price is O(log P); cancel that empties
+a non-best map level is O(log P); the order-index lookup is expected O(1), not worst-case O(1)).
+The README's unmeasured latency figures were removed. `docs/images/structure.png` was deleted:
+it showed an old layout (`src/shard`, `benchmarks/`, `app/`) and was not referenced anywhere.
+LICENSE not added: owner has not chosen one yet.
 
 ### A1 risks
 
