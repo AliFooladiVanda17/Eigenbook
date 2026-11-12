@@ -58,9 +58,11 @@ Every behaviour change updates [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md):
 - C++23, `namespace eigenbook`, `#pragma once`, `snake_case.hpp` / `.cpp` file names, includes
   by full path (`<eigenbook/book/order_book.hpp>`). See
   [ADR 0002](docs/adr/0002-file-layout-and-naming.md).
-- Formatting: [.clang-format](.clang-format). Run `clang-format -i` on the lines you change. The
-  tree has not yet been formatted as a whole; that happens in one separate `style:` commit, so
-  until then do not reformat code you are not otherwise changing.
+- Formatting: [.clang-format](.clang-format) (checked with clang-format 21). The whole tree is
+  formatted; keep it that way with `clang-format -i <files>`, and check with
+  `clang-format --dry-run --Werror $(git ls-files '*.hpp' '*.cpp')`. Includes are grouped:
+  standard library, other system / third-party, `<eigenbook/...>`, local `"..."`. Formatting-only
+  changes go in their own `style:` commit.
 - Static analysis: [.clang-tidy](.clang-tidy), e.g. `clang-tidy -p build/dev-debug <files>`.
 - Editors: [.editorconfig](.editorconfig).
 

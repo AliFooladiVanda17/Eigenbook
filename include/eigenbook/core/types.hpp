@@ -17,13 +17,9 @@ struct Price {
 
     constexpr auto operator<=>(const Price&) const noexcept = default;
 
-    constexpr Price operator+(const std::int64_t ticks) const noexcept {
-        return {value + ticks};
-    }
+    constexpr Price operator+(const std::int64_t ticks) const noexcept { return {value + ticks}; }
 
-    constexpr Price operator-(const std::int64_t ticks) const noexcept {
-        return {value - ticks};
-    }
+    constexpr Price operator-(const std::int64_t ticks) const noexcept { return {value - ticks}; }
 
     // Distance between two prices in ticks.
     constexpr std::int64_t operator-(const Price other) const noexcept {

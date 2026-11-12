@@ -41,8 +41,8 @@ struct FillLog {
 template <typename Book>
 std::vector<std::uint64_t> queueAt(const Book& book, OrderSide side, std::int64_t price) {
     std::vector<std::uint64_t> ids;
-    const PriceLevel* level =
-        side == OrderSide::BUY ? book.bids().findLevel({price}) : book.asks().findLevel({price});
+    const PriceLevel* level = side == OrderSide::BUY ? book.bids().findLevel({price})
+                                                     : book.asks().findLevel({price});
     if (level != nullptr) {
         level->forEachOrder([&](const Order& order) { ids.push_back(order.getId().value); });
     }
@@ -62,7 +62,8 @@ template <>
 struct BookFactory<DenseOrderBook> {
     static std::unique_ptr<DenseOrderBook> make() {
         return std::make_unique<DenseOrderBook>(
-            kInstrument, DenseOrderBook::LadderConfig{.minPrice = {0}, .tickCount = 1000});
+            kInstrument,
+            DenseOrderBook::LadderConfig{.minPrice = {0}, .tickCount = 1000});
     }
 };
 

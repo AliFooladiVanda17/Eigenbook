@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+
 #include <eigenbook/book/price_level.hpp>
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/types.hpp>
@@ -34,19 +35,20 @@ struct SideTraits<OrderSide::SELL> {
 
 // What OrderBook needs from one side of the book. Both strategies from the README satisfy it.
 template <typename L>
-concept PriceLadder = requires(L ladder, const L cladder, Order& order, PriceLevel& level, Price p) {
-    typename L::Config;
-    { L::side } -> std::convertible_to<OrderSide>;
-    { cladder.accepts(p) } noexcept -> std::same_as<bool>;
-    ladder.addOrder(order);
-    { ladder.removeOrder(order) } noexcept;
-    { ladder.removeLevel(level) } noexcept;
-    { ladder.bestLevel() } noexcept -> std::same_as<PriceLevel*>;
-    { cladder.bestLevel() } noexcept -> std::same_as<const PriceLevel*>;
-    { cladder.bestPrice() } noexcept -> std::same_as<std::optional<Price>>;
-    { cladder.findLevel(p) } noexcept -> std::same_as<const PriceLevel*>;
-    { cladder.levelCount() } noexcept -> std::same_as<std::size_t>;
-    { cladder.empty() } noexcept -> std::same_as<bool>;
-};
+concept PriceLadder =
+    requires(L ladder, const L cladder, Order& order, PriceLevel& level, Price p) {
+        typename L::Config;
+        { L::side } -> std::convertible_to<OrderSide>;
+        { cladder.accepts(p) } noexcept -> std::same_as<bool>;
+        ladder.addOrder(order);
+        { ladder.removeOrder(order) } noexcept;
+        { ladder.removeLevel(level) } noexcept;
+        { ladder.bestLevel() } noexcept -> std::same_as<PriceLevel*>;
+        { cladder.bestLevel() } noexcept -> std::same_as<const PriceLevel*>;
+        { cladder.bestPrice() } noexcept -> std::same_as<std::optional<Price>>;
+        { cladder.findLevel(p) } noexcept -> std::same_as<const PriceLevel*>;
+        { cladder.levelCount() } noexcept -> std::same_as<std::size_t>;
+        { cladder.empty() } noexcept -> std::same_as<bool>;
+    };
 
 } // namespace eigenbook

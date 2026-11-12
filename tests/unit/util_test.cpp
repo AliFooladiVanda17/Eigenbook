@@ -3,12 +3,13 @@
 //
 
 #include <cstdint>
-#include <gtest/gtest.h>
 #include <iterator>
 #include <random>
 #include <set>
 #include <unordered_map>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #include <eigenbook/book/locator/hash_order_index.hpp>
 #include <eigenbook/util/level_bitmap.hpp>
@@ -28,8 +29,7 @@ TEST(LevelBitmap, FindNextAndPrevMatchReferenceSet) {
         if (rng() % 3 == 0) {
             bitmap.reset(i);
             reference.erase(i);
-        }
-        else {
+        } else {
             bitmap.set(i);
             reference.insert(i);
         }
@@ -66,8 +66,7 @@ TEST(OrderIndex, MatchesUnorderedMapUnderChurn) {
         Order* value = handles[rng() % handles.size()];
         if (rng() % 2 == 0) {
             EXPECT_EQ(index.insert({key}, value), reference.emplace(key, value).second);
-        }
-        else {
+        } else {
             EXPECT_EQ(index.erase({key}), reference.erase(key) == 1);
         }
         const std::uint64_t probe = rng() % 2048;
@@ -83,13 +82,21 @@ TEST(ObjectPool, RecyclesSlotsWithoutGrowing) {
     EXPECT_EQ(pool.capacity(), 8u);
     std::vector<Order*> live;
     for (std::uint64_t i = 0; i < 8; ++i) {
-        live.push_back(pool.create(
-            OrderId{i}, OrderSide::BUY, OrderType::LIMIT, Price{1}, Quantity{1}, Timestamp{0}));
+        live.push_back(pool.create(OrderId{i},
+                                   OrderSide::BUY,
+                                   OrderType::LIMIT,
+                                   Price{1},
+                                   Quantity{1},
+                                   Timestamp{0}));
         EXPECT_EQ(reinterpret_cast<std::uintptr_t>(live.back()) % kCacheLineSize, 0u);
     }
     Order* recycled = live[3];
     pool.destroy(recycled);
-    EXPECT_EQ(pool.create(OrderId{99}, OrderSide::SELL, OrderType::LIMIT, Price{2}, Quantity{2},
+    EXPECT_EQ(pool.create(OrderId{99},
+                          OrderSide::SELL,
+                          OrderType::LIMIT,
+                          Price{2},
+                          Quantity{2},
                           Timestamp{0}),
               recycled);
     EXPECT_EQ(pool.capacity(), 8u);

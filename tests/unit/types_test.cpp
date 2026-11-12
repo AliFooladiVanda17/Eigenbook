@@ -3,8 +3,9 @@
 //
 
 #include <cstdint>
-#include <gtest/gtest.h>
 #include <unordered_set>
+
+#include <gtest/gtest.h>
 
 #include "test_support.hpp"
 
@@ -50,7 +51,11 @@ TEST(StrongIds, HashAndCompareByValue) {
 }
 
 TEST(Order, ConstructionExposesFieldsAndStartsUnlinked) {
-    const Order order{OrderId{42}, OrderSide::SELL, OrderType::LIMIT, Price{101}, Quantity{9},
+    const Order order{OrderId{42},
+                      OrderSide::SELL,
+                      OrderType::LIMIT,
+                      Price{101},
+                      Quantity{9},
                       Timestamp{5}};
     EXPECT_EQ(order.getId(), OrderId{42});
     EXPECT_EQ(order.getSide(), OrderSide::SELL);

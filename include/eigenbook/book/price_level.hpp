@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/types.hpp>
 
@@ -51,8 +52,7 @@ public:
         order.next = nullptr;
         if (tail != nullptr) {
             tail->next = &order;
-        }
-        else {
+        } else {
             head = &order;
         }
         tail = &order;
@@ -65,14 +65,12 @@ public:
         assert(order.level == this);
         if (order.prev != nullptr) {
             order.prev->next = order.next;
-        }
-        else {
+        } else {
             head = order.next;
         }
         if (order.next != nullptr) {
             order.next->prev = order.prev;
-        }
-        else {
+        } else {
             tail = order.prev;
         }
         totalQuantity -= order.quantity;

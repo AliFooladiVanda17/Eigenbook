@@ -18,9 +18,12 @@ int main() {
     }
 
     int fills = 0;
-    const auto result = book.addOrder(
-        {.id = {2}, .side = OrderSide::BUY, .type = OrderType::LIMIT, .price = {100}, .quantity = {4}},
-        [&fills](const Fill&) { ++fills; });
+    const auto result = book.addOrder({.id = {2},
+                                       .side = OrderSide::BUY,
+                                       .type = OrderType::LIMIT,
+                                       .price = {100},
+                                       .quantity = {4}},
+                                      [&fills](const Fill&) { ++fills; });
 
     if (!result || result->filled != Quantity{4} || fills != 1 ||
         book.findOrder({1})->getQuantity() != Quantity{6}) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <type_traits>
+
 #include <eigenbook/core/types.hpp>
 
 namespace eigenbook {
@@ -72,6 +73,7 @@ private:
 using OrderNode = Order;
 
 static_assert(sizeof(Order) == kCacheLineSize, "Order must occupy exactly one cache line");
-static_assert(std::is_trivially_destructible_v<Order>, "the pool releases nodes without destructors");
+static_assert(std::is_trivially_destructible_v<Order>,
+              "the pool releases nodes without destructors");
 
 } // namespace eigenbook

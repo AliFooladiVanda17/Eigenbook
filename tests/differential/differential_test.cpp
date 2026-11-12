@@ -4,10 +4,11 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <gtest/gtest.h>
 #include <random>
 #include <utility>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #include "test_support.hpp"
 
@@ -26,8 +27,8 @@ public:
         std::uint64_t seq;
     };
 
-    std::vector<Fill> add(std::uint64_t id, OrderSide side, OrderType type, std::int64_t price,
-                          std::uint64_t qty) {
+    std::vector<Fill>
+    add(std::uint64_t id, OrderSide side, OrderType type, std::int64_t price, std::uint64_t qty) {
         std::vector<Fill> fills;
         while (qty > 0) {
             auto best = bestOpposite(side);
@@ -150,18 +151,16 @@ TEST(OrderBookDifferential, MapDenseAndReferenceAgree) {
             ASSERT_EQ(a->cancelled, b->cancelled);
             ASSERT_EQ((a->filled + a->resting + a->cancelled), Quantity{qty});
             refFills = reference.add(id, side, type, price, qty);
-        }
-        else {
+        } else {
             const auto& victim = reference.orders[rng() % reference.orders.size()];
             const std::uint64_t id = victim.id;
             if (op < 8) {
                 ASSERT_TRUE(mapBook.cancelOrder({id}));
                 ASSERT_TRUE(denseBook.cancelOrder({id}));
                 ASSERT_TRUE(reference.cancel(id));
-            }
-            else {
-                const std::int64_t price =
-                    rng() % 2 ? victim.price : 980 + static_cast<std::int64_t>(rng() % 41);
+            } else {
+                const std::int64_t price = rng() % 2 ? victim.price
+                                                     : 980 + static_cast<std::int64_t>(rng() % 41);
                 const std::uint64_t qty = 1 + rng() % 60;
                 const ModifyRequest request{{id}, {price}, {qty}, {nextId}};
                 ASSERT_TRUE(mapBook.modifyOrder(request, mapFills));

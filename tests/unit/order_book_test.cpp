@@ -3,9 +3,10 @@
 //
 
 #include <cstdint>
-#include <gtest/gtest.h>
 #include <utility>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #include "test_support.hpp"
 
@@ -161,8 +162,10 @@ TYPED_TEST(OrderBookTest, SweepFollowsPriceThenTimePriorityAtMakerPrices) {
         got.emplace_back(f.makerId.value, f.price.value);
     }
     EXPECT_EQ(got,
-              (std::vector<std::pair<std::uint64_t, std::int64_t>>{
-                  {5, 100}, {2, 101}, {3, 101}, {1, 102}}));
+              (std::vector<std::pair<std::uint64_t, std::int64_t>>{{5, 100},
+                                                                   {2, 101},
+                                                                   {3, 101},
+                                                                   {1, 102}}));
     EXPECT_EQ(log.fills.back().quantity, Quantity{3});
     EXPECT_FALSE(log.fills.back().makerFilled);
     EXPECT_EQ(res->filled, Quantity{18});

@@ -38,6 +38,8 @@ no release yet; the CMake project version is 0.1.0.
 - Test discovery runs at test time with a 60 s timeout (fixes intermittent post-build failures
   on Windows).
 - README rewritten to match the code; design content moved to `docs/ARCHITECTURE.md`.
+- All C++ sources formatted with `.clang-format`; include groups are now standard library,
+  third-party, `<eigenbook/...>`, local.
 
 ### Removed
 

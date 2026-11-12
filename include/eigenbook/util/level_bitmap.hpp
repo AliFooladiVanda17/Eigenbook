@@ -20,9 +20,7 @@ public:
     static constexpr std::size_t npos = std::numeric_limits<std::size_t>::max();
 
     explicit LevelBitmap(const std::size_t iBits)
-        : bits(iBits)
-        , words((iBits + 63) / 64, 0)
-        , summary((words.size() + 63) / 64, 0) {}
+        : bits(iBits), words((iBits + 63) / 64, 0), summary((words.size() + 63) / 64, 0) {}
 
     [[nodiscard]] std::size_t size() const noexcept { return bits; }
 

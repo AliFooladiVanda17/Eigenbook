@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+
 #include <eigenbook/book/price_ladder.hpp>
 #include <eigenbook/book/price_level.hpp>
 #include <eigenbook/core/order.hpp>
@@ -90,8 +91,7 @@ public:
             // Bids get worse downwards, asks upwards; search from the old best in that direction.
             if constexpr (Side == OrderSide::BUY) {
                 best = idx == 0 ? LevelBitmap::npos : occupied.findPrev(idx - 1);
-            }
-            else {
+            } else {
                 best = occupied.findNext(idx + 1);
             }
         }
@@ -128,8 +128,7 @@ public:
                  i = i == 0 ? LevelBitmap::npos : occupied.findPrev(i - 1)) {
                 cb(static_cast<const PriceLevel&>(levels[i]));
             }
-        }
-        else {
+        } else {
             for (std::size_t i = best; i != LevelBitmap::npos; i = occupied.findNext(i + 1)) {
                 cb(static_cast<const PriceLevel&>(levels[i]));
             }
@@ -155,8 +154,7 @@ private:
                                                       const std::size_t b) noexcept {
         if constexpr (Side == OrderSide::BUY) {
             return a > b;
-        }
-        else {
+        } else {
             return a < b;
         }
     }

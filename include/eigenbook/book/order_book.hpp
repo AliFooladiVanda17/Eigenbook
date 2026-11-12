@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
+
 #include <eigenbook/book/ladder/dense_ladder.hpp>
 #include <eigenbook/book/ladder/map_ladder.hpp>
 #include <eigenbook/book/locator/hash_order_index.hpp>
@@ -112,9 +113,7 @@ public:
 
     [[nodiscard]] std::optional<Price> bestAsk() const noexcept { return askLadder.bestPrice(); }
 
-    [[nodiscard]] const Order* findOrder(const OrderId id) const noexcept {
-        return index.find(id);
-    }
+    [[nodiscard]] const Order* findOrder(const OrderId id) const noexcept { return index.find(id); }
 
     [[nodiscard]] const BidLadder& bids() const noexcept { return bidLadder; }
 
@@ -143,11 +142,11 @@ private:
 
     // A taker at `limit` can trade with a maker level at `makerPrice`.
     template <OrderSide TakerSide>
-    [[nodiscard]] static constexpr bool crosses(const Price limit, const Price makerPrice) noexcept {
+    [[nodiscard]] static constexpr bool crosses(const Price limit,
+                                                const Price makerPrice) noexcept {
         if constexpr (TakerSide == OrderSide::BUY) {
             return makerPrice <= limit;
-        }
-        else {
+        } else {
             return makerPrice >= limit;
         }
     }
@@ -196,12 +195,17 @@ auto BasicOrderBook<Ladder>::addOrder(const OrderRequest& request, OnFill&& onFi
         return std::unexpected(RejectReason::PRICE_OUT_OF_RANGE);
     }
 
-    const Quantity remaining =
-        request.side == OrderSide::BUY
-            ? sweep<OrderSide::BUY>(
-                  request.id, request.type, request.price, request.quantity, onFill)
-            : sweep<OrderSide::SELL>(
-                  request.id, request.type, request.price, request.quantity, onFill);
+    const Quantity remaining = request.side == OrderSide::BUY
+                                   ? sweep<OrderSide::BUY>(request.id,
+                                                           request.type,
+                                                           request.price,
+                                                           request.quantity,
+                                                           onFill)
+                                   : sweep<OrderSide::SELL>(request.id,
+                                                            request.type,
+                                                            request.price,
+                                                            request.quantity,
+                                                            onFill);
 
     ExecutionResult result{.filled = request.quantity - remaining};
     if (remaining.isZero()) {
@@ -218,7 +222,8 @@ auto BasicOrderBook<Ladder>::addOrder(const OrderRequest& request, OnFill&& onFi
 
 template <template <OrderSide> class Ladder>
     requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
-auto BasicOrderBook<Ladder>::cancelOrder(const OrderId id) -> std::expected<Quantity, RejectReason> {
+auto BasicOrderBook<Ladder>::cancelOrder(const OrderId id)
+    -> std::expected<Quantity, RejectReason> {
     Order* order = index.find(id);
     if (order == nullptr) [[unlikely]] {
         return std::unexpected(RejectReason::UNKNOWN_ORDER_ID);
@@ -246,8 +251,7 @@ auto BasicOrderBook<Ladder>::modifyOrder(const ModifyRequest& request, OnFill&& 
             PriceLevel::ownerOf(*order)->reduce(*order, request.quantity);
             return ExecutionResult{.resting = request.quantity};
         }
-    }
-    else if (!accepts(order->getSide(), request.price)) [[unlikely]] {
+    } else if (!accepts(order->getSide(), request.price)) [[unlikely]] {
         return std::unexpected(RejectReason::PRICE_OUT_OF_RANGE);
     }
 
@@ -273,8 +277,7 @@ Quantity BasicOrderBook<Ladder>::sweep(const OrderId takerId,
     auto& makers = [this]() -> auto& {
         if constexpr (TakerSide == OrderSide::BUY) {
             return askLadder;
-        }
-        else {
+        } else {
             return bidLadder;
         }
     }();
@@ -308,8 +311,7 @@ Quantity BasicOrderBook<Ladder>::sweep(const OrderId takerId,
                 level->popFront();
                 index.erase(maker.getId());
                 pool.destroy(&maker);
-            }
-            else {
+            } else {
                 level->fillFront(traded);
             }
         } while (!quantity.isZero() && !level->empty());
@@ -334,20 +336,17 @@ void BasicOrderBook<Ladder>::rest(const OrderRequest& request, const Quantity qu
     // Index growth or a new tree level can allocate; never leave a half-linked node behind.
     try {
         index.insert(request.id, order);
-    }
-    catch (...) {
+    } catch (...) {
         pool.destroy(order);
         throw;
     }
     try {
         if (request.side == OrderSide::BUY) {
             bidLadder.addOrder(*order);
-        }
-        else {
+        } else {
             askLadder.addOrder(*order);
         }
-    }
-    catch (...) {
+    } catch (...) {
         index.erase(request.id);
         pool.destroy(order);
         throw;
@@ -359,8 +358,7 @@ template <template <OrderSide> class Ladder>
 void BasicOrderBook<Ladder>::removeResting(Order& order) noexcept {
     if (order.getSide() == OrderSide::BUY) {
         bidLadder.removeOrder(order);
-    }
-    else {
+    } else {
         askLadder.removeOrder(order);
     }
     index.erase(order.getId());

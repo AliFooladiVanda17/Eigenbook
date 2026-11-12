@@ -98,11 +98,23 @@ AlignConsecutiveMacros: false
 SortIncludes: true
 IncludeBlocks: Regroup
 
+# Groups, in this order, separated by a blank line:
+#   1. C++ standard library        <vector>, <memory_resource>
+#   2. other system / third party  <gtest/gtest.h>, <intrin.h>, <windows.h>
+#   3. Eigenbook public headers    <eigenbook/...>
+#   4. local headers               "test_support.hpp"
+# The first matching regex wins, so the specific patterns come first.
 IncludeCategories:
-  - Regex: '^<.*>'
+  - Regex: '^<eigenbook/'
+    Priority: 3
+
+  - Regex: '^"'
+    Priority: 4
+
+  - Regex: '^<[a-z_0-9]+>$'
     Priority: 1
 
-  - Regex: '^".*"'
+  - Regex: '^<.*>'
     Priority: 2
 
 # =========================================================

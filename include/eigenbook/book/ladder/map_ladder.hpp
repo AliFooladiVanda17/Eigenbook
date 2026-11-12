@@ -6,6 +6,7 @@
 #include <memory>
 #include <memory_resource>
 #include <optional>
+
 #include <eigenbook/book/price_ladder.hpp>
 #include <eigenbook/book/price_level.hpp>
 #include <eigenbook/core/order.hpp>
@@ -65,8 +66,7 @@ public:
         // The matcher always empties the best level, which is begin(): erase it without a search.
         if (!levels.empty() && &levels.begin()->second == &level) {
             levels.erase(levels.begin());
-        }
-        else {
+        } else {
             levels.erase(level.price());
         }
     }

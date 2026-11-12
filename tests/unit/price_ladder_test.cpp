@@ -3,8 +3,9 @@
 //
 
 #include <cstdint>
-#include <gtest/gtest.h>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #include "test_support.hpp"
 

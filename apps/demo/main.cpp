@@ -9,7 +9,11 @@
 namespace {
 
 struct Op {
-    enum Kind : std::uint8_t { ADD, CANCEL };
+    enum Kind : std::uint8_t {
+        ADD,
+        CANCEL
+    };
+
     Kind kind;
     eigenbook::OrderRequest request;
 };
@@ -59,8 +63,7 @@ void run(const char* name, Book& book, const std::vector<Op>& ops) {
     for (const Op& op : ops) {
         if (op.kind == Op::ADD) {
             (void)book.addOrder(op.request, onFill);
-        }
-        else {
+        } else {
             (void)book.cancelOrder(op.request.id); // may already be filled
         }
     }

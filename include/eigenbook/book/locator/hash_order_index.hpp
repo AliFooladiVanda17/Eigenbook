@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/types.hpp>
 
@@ -98,7 +99,8 @@ private:
         Order* order{nullptr}; // nullptr marks an empty slot
     };
 
-    // splitmix64 finalizer: exchange ids are often sequential, which identity hashing would cluster.
+    // splitmix64 finalizer: exchange ids are often sequential, which identity hashing would
+    // cluster.
     [[nodiscard]] static constexpr std::uint64_t mix(std::uint64_t x) noexcept {
         x ^= x >> 30;
         x *= 0xbf58476d1ce4e5b9ULL;
