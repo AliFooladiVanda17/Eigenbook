@@ -1,7 +1,7 @@
 # Benchmarks
 
 What is measured, how, on what, and the results. Every number here comes from
-`bench/results/<compiler>/summary.csv`, written by `eigenbook_latency`; the tables are generated
+`bench/results/<session>/summary.csv`, written by `eigenbook_latency`; the tables are generated
 from those files, not typed in.
 
 ## Method
@@ -93,7 +93,7 @@ cmake --build --preset bench
 also prints probe-length statistics of the order index. Its latencies are not comparable with the
 plain build.
 
-## Results
+## Phase A2: results
 
 ### Status: provisional (machine on battery, core clock not stable)
 
@@ -497,3 +497,366 @@ Same workloads and seeds. Most workloads in this session ran in more than one cl
 | response | 5000000 | 194 <sub>193–195</sub> | 268 <sub>264–269</sub> | 2737 <sub>471–3327</sub> | 63835 <sub>37716–270137</sub> | 432511 <sub>186666–444566</sub> | 540639 <sub>384603–578620</sub> |
 
 </details>
+
+## Phase A3: map-ladder tail
+
+**Question.** Where does the map ladder's tail come from? Hypothesis: node allocation + pointer
+chasing over scattered nodes + rebalancing. M1 / M2 remove the first; only the dense and hybrid
+ladders remove all three.
+
+**Books.** `map` = M0 (pool over the heap, the default `OrderBook`), `map-m1` (pool over a
+preallocated arena, pre-warmed), `map-m2` (preallocated single-size free list), `dense`, `hybrid`
+(16,384-tick window; a second session repeats hybrid with a 4,096-tick window next to dense).
+M1, M2 and hybrid are sized to the workload's peak number of levels per side + 25 % + 64.
+
+### Environment
+
+As in A2 (i7-13650HX, CPU 2 = P-core, Windows 11, Clang 21.1.8 `-O3`), except: **on AC power**,
+still the **Balanced** power plan. Source: git `4aebaa8` (A3a). Clock probe (empty-timer p50):
+51–55 ticks in almost every run of the main session, with three exceptions, each shown in the
+tables: W1 map-m1 run 5 (45), W2-churn hybrid run 5 (43), and W5 run 5 for **all** books
+(42–43, so W5 books stay comparable with each other). The 4,096-window session ran at 42–45
+throughout, a different clock state: compare it only with the dense rows of the same session.
+Every run: 0 outcome mismatches. Files: `bench/results/a3-clang-21.1.8/` and
+`bench/results/a3-clang-21.1.8-hybrid4096/`.
+
+### What the data shows
+
+1. **Removing node allocation barely moves the map ladder** (W2-drift, all 25 runs at probe
+   51–52). Passive add p50 / p99 / p99.9: M0 161 / 267 / 383 ns, M1 159 / 260 / 354, M2
+   153 / 250 / 351. Cancel: M0 198 / 322 / 397, M1 197 / 324 / 396, M2 191 / 316 / 383. That is
+   ≤ 7 % at p50–p99 and ≤ 10 % at p99.9. M0 fetched memory from upstream 2–3 times per run of
+   1,000,000 timed ops, while a run's p99.99 is set by its slowest ~100 ops, so those events cannot
+   explain the p99.99 either; the p99.99 ranges of M0, M1 and M2 overlap.
+2. **The tree itself is the cost.** In the same runs the dense ladder is about 2–3× faster through
+   p99.9 than M0 (1.9–2.6× for passive adds: 62 / 130 / 197 ns; 2.3–3.0× for cancels: 65 / 123 / 174 ns). W2-churn shows the same
+   pattern (map p50 99–105 ns vs dense 51 ns for adds; 122–126 vs 61 ns for cancels). These data
+   do not separate pointer chasing from rebalancing; both are what remains once allocation is
+   gone. **Verdict on the hypothesis:** the allocation part is real (M0 does allocate) but small in
+   these workloads; almost all of the map's extra latency comes from the parts only the dense /
+   hybrid layouts remove.
+3. **M2 is consistently the fastest map variant**, by 4–6 % at p50 in W2-churn, W2-drift and
+   W5 (for example W2-drift add p50 153 vs 159 / 161 ns). A plausible reason, not tested: its
+   nodes sit in one contiguous array.
+4. **The hybrid ladder matches the dense one when its window covers the active band.** W2-drift
+   (band ±4000 ticks, window 16,384): passive add p50 / p99 / p99.9 68 / 133 / 208 ns vs dense
+   62 / 130 / 197; cancel identical (65 / 123 / 171 vs 65 / 123 / 174). Unlike the dense ladder it
+   accepts any price.
+5. **With a window smaller than the band it loses most of the benefit.** 4,096-tick window, same
+   session as dense: W2-drift passive add p50 96 vs 50 ns, p99.9 554 vs 153 ns; cancel p90 199 vs
+   72 ns. In W2-churn (band ±1000, fits the window) it stays close to dense (add p50 47 vs 42 ns).
+   The window size is a per-instrument setting that has to cover where the trading happens.
+6. **Hybrid aggressive adds have a p99.9 spike** in W2-drift (add-aggr-1 p99.9 1,538 ns vs dense
+   345 ns). Probable cause, not instrumented: an aggressive add that rests moves the touch and
+   triggers recentering, which may move up to 8 levels with all their orders in that one add.
+7. **W1** (the old demo stream, 524,000 resting orders): all five books within about 10 % of each
+   other (passive add p50 162–173 ns, cancel p50 284–323 ns); with a book this large the order
+   index and cache misses dominate, not the ladder.
+8. **W5** (open loop, Hawkes bursts): service times rank as in W2 (passive add p50 M0 129, M2 123,
+   dense 73, hybrid 82 ns). Response-time percentiles above p99 vary by 10× between runs of the
+   same book (for example M0 p99 676–17,796 ns), so they cannot rank the books.
+9. **The far tail** (p99.99 ≈ 5 µs, max 10 µs–1 ms) is the same for every book, including dense
+   (W2-drift dense p99.99 5.0 µs): in this environment it is set by the machine, not by the
+   ladder.
+
+### Recommendation (owner's decision)
+
+- For instruments with a known, bounded active price band: **dense**, or **hybrid** with a
+  window covering the band if prices are unbounded.
+- Where a tree is needed: **M2** (no allocation after construction, and the fastest map variant
+  measured). M0 should not be used where NFR-02 applies.
+- `OrderBook` is still M0, so the default type allocates after warm-up. Making a bounded type the
+  default changes the API (it needs `maxLevels`); not done without your decision.
+
+### Results: A3 main session (Clang 21.1.8, AC, Balanced)
+
+Latencies in ns; median over 5 runs, min–max in small print.
+
+**w1 / map**: churn 0.08 levels/op; pmr upstream allocations per run: 0, 1, 1, 1, 0; clock probe per run (ticks): 55, 55, 53, 53, 54
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 5300656 | 173 <sub>171–178</sub> | 265 <sub>257–273</sub> | 409 <sub>403–412</sub> | 520 <sub>505–536</sub> | 10045 <sub>9343–17283</sub> | 352238 <sub>139466–713920</sub> |
+| add-aggr-1 | 328066 | 167 <sub>165–174</sub> | 279 <sub>268–289</sub> | 424 <sub>412–431</sub> | 590 <sub>559–605</sub> | 9846 <sub>9423–13778</sub> | 49446 <sub>18260–64890</sub> |
+| add-aggr-2..4 | 363393 | 194 <sub>189–201</sub> | 357 <sub>345–364</sub> | 543 <sub>519–555</sub> | 759 <sub>709–807</sub> | 9298 <sub>5362–25022</sub> | 23182 <sub>20813–101679</sub> |
+| add-aggr-5+ | 9093 | 379 <sub>368–386</sub> | 655 <sub>626–679</sub> | 926 <sub>907–961</sub> | 1397 <sub>1122–5473</sub> | 4459 <sub>1210–10700</sub> | 4459 <sub>1210–10700</sub> |
+| cancel-hit | 2358547 | 323 <sub>307–340</sub> | 453 <sub>429–472</sub> | 621 <sub>602–629</sub> | 811 <sub>775–847</sub> | 18299 <sub>10422–36278</sub> | 110609 <sub>86254–129703</sub> |
+| cancel-miss | 640245 | 177 <sub>174–182</sub> | 228 <sub>220–244</sub> | 392 <sub>386–397</sub> | 486 <sub>476–499</sub> | 12716 <sub>9229–32465</sub> | 51222 <sub>27947–88533</sub> |
+
+**w1 / map-m1**: churn 0.08 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 54, 53, 55, 51, 45
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 5300656 | 172 <sub>169–175</sub> | 264 <sub>255–268</sub> | 408 <sub>406–412</sub> | 521 <sub>513–528</sub> | 9383 <sub>8767–12317</sub> | 161339 <sub>124875–850271</sub> |
+| add-aggr-1 | 328066 | 167 <sub>163–170</sub> | 276 <sub>268–281</sub> | 422 <sub>415–433</sub> | 584 <sub>561–609</sub> | 9965 <sub>5245–36027</sub> | 62943 <sub>10945–90280</sub> |
+| add-aggr-2..4 | 363393 | 193 <sub>189–196</sub> | 353 <sub>343–357</sub> | 531 <sub>509–541</sub> | 747 <sub>707–787</sub> | 9383 <sub>8961–13070</sub> | 74591 <sub>66516–89940</sub> |
+| add-aggr-5+ | 9093 | 367 <sub>362–377</sub> | 625 <sub>593–664</sub> | 897 <sub>864–966</sub> | 1188 <sub>1028–5742</sub> | 4354 <sub>1306–16722</sub> | 4354 <sub>1306–16722</sub> |
+| cancel-hit | 2358547 | 311 <sub>286–329</sub> | 456 <sub>429–464</sub> | 621 <sub>609–629</sub> | 834 <sub>793–842</sub> | 13721 <sub>9646–22545</sub> | 208561 <sub>111886–748230</sub> |
+| cancel-miss | 640245 | 171 <sub>167–176</sub> | 225 <sub>213–232</sub> | 389 <sub>387–393</sub> | 487 <sub>477–498</sub> | 9012 <sub>4643–12739</sub> | 66427 <sub>18073–84800</sub> |
+
+**w1 / map-m2**: churn 0.08 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 53, 55, 52, 53, 53
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 5300656 | 170 <sub>169–180</sub> | 258 <sub>254–277</sub> | 408 <sub>401–416</sub> | 515 <sub>509–537</sub> | 9503 <sub>8989–12751</sub> | 132156 <sub>81556–866958</sub> |
+| add-aggr-1 | 328066 | 163 <sub>162–175</sub> | 265 <sub>261–285</sub> | 412 <sub>408–422</sub> | 581 <sub>540–622</sub> | 8915 <sub>5659–24908</sub> | 35308 <sub>19788–66358</sub> |
+| add-aggr-2..4 | 363393 | 186 <sub>184–199</sub> | 339 <sub>335–359</sub> | 509 <sub>500–548</sub> | 732 <sub>713–776</sub> | 9686 <sub>5491–30593</sub> | 49020 <sub>31188–81554</sub> |
+| add-aggr-5+ | 9093 | 346 <sub>345–371</sub> | 595 <sub>580–684</sub> | 903 <sub>840–965</sub> | 4506 <sub>1202–7500</sub> | 24301 <sub>1297–35462</sub> | 24301 <sub>1297–35462</sub> |
+| cancel-hit | 2358547 | 299 <sub>291–347</sub> | 435 <sub>432–482</sub> | 610 <sub>608–639</sub> | 794 <sub>790–849</sub> | 16917 <sub>10040–34474</sub> | 137040 <sub>94116–476478</sub> |
+| cancel-miss | 640245 | 171 <sub>168–182</sub> | 216 <sub>213–250</sub> | 388 <sub>383–395</sub> | 481 <sub>471–493</sub> | 9115 <sub>7517–12796</sub> | 76358 <sub>18867–151753</sub> |
+
+**w1 / dense**: churn 0.08 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 55, 55, 55, 54, 55
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 5300656 | 162 <sub>161–172</sub> | 219 <sub>216–239</sub> | 385 <sub>381–387</sub> | 471 <sub>464–484</sub> | 9195 <sub>6027–10314</sub> | 103029 <sub>93412–178165</sub> |
+| add-aggr-1 | 328066 | 161 <sub>158–170</sub> | 236 <sub>232–255</sub> | 391 <sub>390–394</sub> | 492 <sub>488–529</sub> | 8618 <sub>6957–10296</sub> | 83221 <sub>24726–100897</sub> |
+| add-aggr-2..4 | 363393 | 181 <sub>178–190</sub> | 315 <sub>312–334</sub> | 484 <sub>475–517</sub> | 742 <sub>719–1641</sub> | 10102 <sub>5365–12580</sub> | 41143 <sub>21613–1252620</sub> |
+| add-aggr-5+ | 9093 | 322 <sub>315–341</sub> | 573 <sub>553–647</sub> | 862 <sub>828–959</sub> | 4212 <sub>1185–9806</sub> | 8668 <sub>1252–97182</sub> | 8668 <sub>1252–97182</sub> |
+| cancel-hit | 2358547 | 284 <sub>274–336</sub> | 412 <sub>405–454</sub> | 591 <sub>588–607</sub> | 846 <sub>779–1799</sub> | 10160 <sub>9874–13196</sub> | 153860 <sub>109290–171024</sub> |
+| cancel-miss | 640245 | 167 <sub>164–179</sub> | 207 <sub>203–231</sub> | 381 <sub>378–386</sub> | 459 <sub>450–473</sub> | 9332 <sub>7979–10245</sub> | 98583 <sub>64214–136991</sub> |
+
+**w1 / hybrid**: churn 0.08 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 55, 54, 55, 54, 56
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 5300656 | 168 <sub>166–171</sub> | 230 <sub>228–238</sub> | 391 <sub>388–395</sub> | 491 <sub>469–498</sub> | 10177 <sub>9343–10896</sub> | 191198 <sub>100664–843958</sub> |
+| add-aggr-1 | 328066 | 163 <sub>160–166</sub> | 249 <sub>244–256</sub> | 399 <sub>395–401</sub> | 519 <sub>513–525</sub> | 9417 <sub>5570–10348</sub> | 26584 <sub>16338–54421</sub> |
+| add-aggr-2..4 | 363393 | 187 <sub>184–190</sub> | 330 <sub>326–338</sub> | 503 <sub>492–519</sub> | 751 <sub>693–789</sub> | 10958 <sub>9463–13356</sub> | 41034 <sub>23733–128177</sub> |
+| add-aggr-5+ | 9093 | 342 <sub>339–352</sub> | 598 <sub>589–650</sub> | 894 <sub>884–936</sub> | 5787 <sub>1120–10793</sub> | 9591 <sub>1206–24227</sub> | 9591 <sub>1206–24227</sub> |
+| cancel-hit | 2358547 | 294 <sub>285–319</sub> | 421 <sub>413–436</sub> | 595 <sub>587–600</sub> | 825 <sub>783–891</sub> | 12854 <sub>12420–23447</sub> | 127189 <sub>108625–178568</sub> |
+| cancel-miss | 640245 | 168 <sub>164–173</sub> | 210 <sub>206–221</sub> | 382 <sub>378–386</sub> | 464 <sub>453–476</sub> | 9406 <sub>7220–14897</sub> | 91691 <sub>17342–1340660</sub> |
+
+**w2-churn / map**: churn 1.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 2; clock probe per run (ticks): 51, 51, 51, 51, 51
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2366359 | 105 <sub>103–107</sub> | 141 <sub>141–144</sub> | 182 <sub>179–186</sub> | 244 <sub>230–249</sub> | 4794 <sub>2130–5628</sub> | 65642 <sub>33993–149978</sub> |
+| add-aggr-1 | 299095 | 122 <sub>120–125</sub> | 184 <sub>179–189</sub> | 243 <sub>231–250</sub> | 313 <sub>286–323</sub> | 6073 <sub>4029–7951</sub> | 32130 <sub>12977–66748</sub> |
+| add-aggr-2..4 | 7558 | 151 <sub>144–157</sub> | 240 <sub>233–250</sub> | 313 <sub>306–322</sub> | 505 <sub>347–1118</sub> | 512 <sub>352–14368</sub> | 512 <sub>352–14368</sub> |
+| cancel-hit | 2326988 | 125 <sub>124–127</sub> | 166 <sub>163–169</sub> | 211 <sub>203–215</sub> | 269 <sub>253–273</sub> | 5159 <sub>3176–5993</sub> | 128588 <sub>41472–814284</sub> |
+
+**w2-churn / map-m1**: churn 1.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 51, 51, 51, 51, 51
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2366359 | 104 <sub>101–106</sub> | 140 <sub>137–142</sub> | 180 <sub>175–184</sub> | 240 <sub>228–247</sub> | 3541 <sub>2460–5111</sub> | 71018 <sub>31104–81050</sub> |
+| add-aggr-1 | 299095 | 120 <sub>116–124</sub> | 180 <sub>172–185</sub> | 237 <sub>224–243</sub> | 307 <sub>284–331</sub> | 5550 <sub>5108–9885</sub> | 33387 <sub>8416–74039</sub> |
+| add-aggr-2..4 | 7558 | 149 <sub>140–158</sub> | 237 <sub>222–240</sub> | 305 <sub>276–310</sub> | 412 <sub>367–544</sub> | 1443 <sub>381–31895</sub> | 1443 <sub>381–31895</sub> |
+| cancel-hit | 2326988 | 126 <sub>122–129</sub> | 167 <sub>160–170</sub> | 212 <sub>200–216</sub> | 268 <sub>256–271</sub> | 5117 <sub>1589–5139</sub> | 141294 <sub>85198–331879</sub> |
+
+**w2-churn / map-m2**: churn 1.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 51, 50, 51, 51, 51
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2366359 | 99.2 <sub>98.5–101</sub> | 136 <sub>134–137</sub> | 176 <sub>172–178</sub> | 239 <sub>234–258</sub> | 2303 <sub>1465–5051</sub> | 89983 <sub>64451–98382</sub> |
+| add-aggr-1 | 299095 | 113 <sub>111–117</sub> | 172 <sub>166–174</sub> | 231 <sub>215–232</sub> | 307 <sub>276–320</sub> | 6130 <sub>938–7996</sub> | 38749 <sub>5595–368105</sub> |
+| add-aggr-2..4 | 7558 | 144 <sub>137–151</sub> | 225 <sub>213–228</sub> | 289 <sub>266–303</sub> | 361 <sub>329–412</sub> | 432 <sub>332–5090</sub> | 432 <sub>332–5090</sub> |
+| cancel-hit | 2326988 | 122 <sub>121–124</sub> | 165 <sub>160–166</sub> | 211 <sub>203–213</sub> | 270 <sub>259–276</sub> | 5071 <sub>3952–5901</sub> | 80860 <sub>33973–148584</sub> |
+
+**w2-churn / dense**: churn 1.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 51, 51, 51, 52, 51
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2366359 | 51.4 <sub>50.7–52.1</sub> | 67.8 <sub>63.1–69.6</sub> | 88.8 <sub>83.1–92.8</sub> | 144 <sub>139–163</sub> | 2204 <sub>524–4811</sub> | 82589 <sub>35493–746795</sub> |
+| add-aggr-1 | 299095 | 78.1 <sub>75.3–80.3</sub> | 108 <sub>99.2–112</sub> | 153 <sub>133–177</sub> | 250 <sub>200–331</sub> | 5117 <sub>5054–9035</sub> | 66508 <sub>20565–79870</sub> |
+| add-aggr-2..4 | 7558 | 118 <sub>113–121</sub> | 163 <sub>148–170</sub> | 215 <sub>191–224</sub> | 253 <sub>230–323</sub> | 432 <sub>374–11891</sub> | 432 <sub>374–11891</sub> |
+| cancel-hit | 2326988 | 61.4 <sub>59.9–62.1</sub> | 79.6 <sub>76.7–81.0</sub> | 108 <sub>95.6–112</sub> | 143 <sub>123–146</sub> | 2119 <sub>410–4997</sub> | 80789 <sub>47836–97086</sub> |
+
+**w2-churn / hybrid**: churn 1.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 51, 51, 51, 52, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2366359 | 57.1 <sub>56.4–57.8</sub> | 72.4 <sub>69.6–75.3</sub> | 93.8 <sub>88.1–96.3</sub> | 148 <sub>124–168</sub> | 3362 <sub>1273–5011</sub> | 85110 <sub>42989–125223</sub> |
+| add-aggr-1 | 299095 | 85.6 <sub>83.8–91.3</sub> | 117 <sub>111–123</sub> | 162 <sub>146–204</sub> | 253 <sub>223–375</sub> | 4828 <sub>1943–5085</sub> | 11185 <sub>7651–36601</sub> |
+| add-aggr-2..4 | 7558 | 127 <sub>122–135</sub> | 172 <sub>164–179</sub> | 219 <sub>213–239</sub> | 280 <sub>249–426</sub> | 435 <sub>279–15906</sub> | 435 <sub>279–15906</sub> |
+| cancel-hit | 2326988 | 61.4 <sub>57.8–63.1</sub> | 81.0 <sub>77.4–83.1</sub> | 108 <sub>99.9–114</sub> | 144 <sub>126–152</sub> | 1762 <sub>569–5037</sub> | 47997 <sub>23985–888731</sub> |
+
+**w2-drift / map**: churn 0.89 levels/op; pmr upstream allocations per run: 2, 3, 2, 3, 2; clock probe per run (ticks): 51, 52, 52, 52, 52
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2381063 | 161 <sub>156–163</sub> | 205 <sub>202–206</sub> | 267 <sub>264–270</sub> | 383 <sub>378–396</sub> | 7260 <sub>6929–10930</sub> | 99984 <sub>59163–707435</sub> |
+| add-aggr-1 | 288861 | 160 <sub>149–163</sub> | 249 <sub>242–251</sub> | 334 <sub>327–340</sub> | 448 <sub>425–472</sub> | 13641 <sub>4948–25137</sub> | 44305 <sub>27988–75457</sub> |
+| add-aggr-2..4 | 12940 | 182 <sub>174–186</sub> | 325 <sub>318–337</sub> | 464 <sub>448–470</sub> | 1987 <sub>558–4035</sub> | 4243 <sub>1403–7123</sub> | 4243 <sub>1403–7123</sub> |
+| add-aggr-5+ | 3 | 372 <sub>354–385</sub> | 372 <sub>354–385</sub> | 372 <sub>354–385</sub> | 372 <sub>354–385</sub> | 372 <sub>354–385</sub> | 372 <sub>354–385</sub> |
+| cancel-hit | 2317133 | 198 <sub>187–199</sub> | 263 <sub>257–265</sub> | 322 <sub>320–325</sub> | 397 <sub>387–407</sub> | 7191 <sub>6683–12545</sub> | 107986 <sub>76544–1264480</sub> |
+
+**w2-drift / map-m1**: churn 0.89 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 52, 52, 52, 52, 52
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2381063 | 159 <sub>156–161</sub> | 201 <sub>198–204</sub> | 260 <sub>251–261</sub> | 354 <sub>341–366</sub> | 6655 <sub>5856–7237</sub> | 86871 <sub>58910–184232</sub> |
+| add-aggr-1 | 288861 | 160 <sub>151–161</sub> | 243 <sub>237–245</sub> | 323 <sub>316–325</sub> | 405 <sub>388–420</sub> | 5345 <sub>5211–7003</sub> | 47654 <sub>7187–56036</sub> |
+| add-aggr-2..4 | 12940 | 176 <sub>169–179</sub> | 320 <sub>307–323</sub> | 443 <sub>429–456</sub> | 584 <sub>533–624</sub> | 5239 <sub>574–6545</sub> | 5239 <sub>574–6545</sub> |
+| add-aggr-5+ | 3 | 374 <sub>270–397</sub> | 374 <sub>270–397</sub> | 374 <sub>270–397</sub> | 374 <sub>270–397</sub> | 374 <sub>270–397</sub> | 374 <sub>270–397</sub> |
+| cancel-hit | 2317133 | 197 <sub>190–200</sub> | 261 <sub>258–266</sub> | 324 <sub>319–328</sub> | 396 <sub>383–398</sub> | 6392 <sub>5445–6866</sub> | 92414 <sub>83578–167418</sub> |
+
+**w2-drift / map-m2**: churn 0.89 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 52, 52, 52, 52, 51
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2381063 | 153 <sub>150–156</sub> | 195 <sub>191–197</sub> | 250 <sub>243–253</sub> | 351 <sub>334–352</sub> | 6227 <sub>5242–6364</sub> | 80189 <sub>55997–98827</sub> |
+| add-aggr-1 | 288861 | 148 <sub>143–153</sub> | 234 <sub>229–237</sub> | 312 <sub>303–319</sub> | 397 <sub>372–423</sub> | 5159 <sub>2062–7306</sub> | 43975 <sub>6862–82760</sub> |
+| add-aggr-2..4 | 12940 | 168 <sub>161–174</sub> | 308 <sub>296–314</sub> | 426 <sub>412–443</sub> | 538 <sub>525–579</sub> | 5148 <sub>597–5234</sub> | 5148 <sub>597–5234</sub> |
+| add-aggr-5+ | 3 | 327 <sub>299–364</sub> | 327 <sub>299–364</sub> | 327 <sub>299–364</sub> | 327 <sub>299–364</sub> | 327 <sub>299–364</sub> | 327 <sub>299–364</sub> |
+| cancel-hit | 2317133 | 191 <sub>184–194</sub> | 256 <sub>251–258</sub> | 316 <sub>310–317</sub> | 383 <sub>375–386</sub> | 6792 <sub>5998–7026</sub> | 90408 <sub>71136–670220</sub> |
+
+**w2-drift / dense**: churn 0.89 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 51, 52, 52, 52, 51
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2381063 | 62.1 <sub>57.1–62.4</sub> | 88.1 <sub>84.2–88.8</sub> | 130 <sub>119–132</sub> | 197 <sub>177–215</sub> | 5025 <sub>4837–5054</sub> | 56037 <sub>49775–93380</sub> |
+| add-aggr-1 | 288861 | 88.8 <sub>83.8–89.5</sub> | 134 <sub>127–135</sub> | 211 <sub>195–215</sub> | 345 <sub>308–367</sub> | 5051 <sub>2261–6541</sub> | 44197 <sub>6626–740055</sub> |
+| add-aggr-2..4 | 12940 | 137 <sub>132–139</sub> | 214 <sub>202–223</sub> | 329 <sub>308–340</sub> | 511 <sub>423–971</sub> | 5127 <sub>441–57468</sub> | 5127 <sub>441–57468</sub> |
+| add-aggr-5+ | 3 | 312 <sub>282–375</sub> | 312 <sub>282–375</sub> | 312 <sub>282–375</sub> | 312 <sub>282–375</sub> | 312 <sub>282–375</sub> | 312 <sub>282–375</sub> |
+| cancel-hit | 2317133 | 64.9 <sub>62.1–65.3</sub> | 88.5 <sub>85.3–89.5</sub> | 123 <sub>119–127</sub> | 174 <sub>163–177</sub> | 5005 <sub>4112–5031</sub> | 86332 <sub>37386–115127</sub> |
+
+**w2-drift / hybrid**: churn 0.89 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 51, 52, 52, 51, 52
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2381063 | 67.8 <sub>64.9–70.3</sub> | 94.2 <sub>92.0–97.4</sub> | 133 <sub>129–138</sub> | 208 <sub>196–210</sub> | 5020 <sub>4834–5045</sub> | 83260 <sub>49514–126358</sub> |
+| add-aggr-1 | 288861 | 97.4 <sub>96.0–101</sub> | 145 <sub>142–148</sub> | 233 <sub>215–235</sub> | 1538 <sub>1389–1582</sub> | 6056 <sub>5071–6284</sub> | 43219 <sub>8717–51434</sub> |
+| add-aggr-2..4 | 12940 | 150 <sub>146–154</sub> | 234 <sub>230–248</sub> | 1366 <sub>682–1505</sub> | 2186 <sub>1886–2441</sub> | 8109 <sub>1943–34227</sub> | 8109 <sub>1943–34227</sub> |
+| add-aggr-5+ | 3 | 360 <sub>292–391</sub> | 360 <sub>292–391</sub> | 360 <sub>292–391</sub> | 360 <sub>292–391</sub> | 360 <sub>292–391</sub> | 360 <sub>292–391</sub> |
+| cancel-hit | 2317133 | 64.9 <sub>64.2–66.4</sub> | 89.9 <sub>88.8–92.0</sub> | 123 <sub>122–128</sub> | 171 <sub>168–179</sub> | 5002 <sub>557–5054</sub> | 78815 <sub>44136–104823</sub> |
+
+**w5-burst / map**: churn 0.92 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 52, 51, 52, 52, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2388416 | 129 <sub>103–130</sub> | 173 <sub>137–174</sub> | 223 <sub>179–226</sub> | 282 <sub>239–310</sub> | 5622 <sub>2100–5998</sub> | 61627 <sub>12526–98065</sub> |
+| add-aggr-1 | 291615 | 101 <sub>80.3–103</sub> | 229 <sub>184–234</sub> | 312 <sub>249–315</sub> | 397 <sub>324–411</sub> | 5690 <sub>588–6900</sub> | 38635 <sub>2612–53115</sub> |
+| add-aggr-2..4 | 132640 | 167 <sub>136–172</sub> | 289 <sub>234–295</sub> | 403 <sub>327–414</sub> | 530 <sub>436–548</sub> | 7106 <sub>5699–8476</sub> | 30462 <sub>6956–65972</sub> |
+| add-aggr-5+ | 734 | 370 <sub>297–377</sub> | 467 <sub>373–502</sub> | 615 <sub>516–684</sub> | 650 <sub>542–5950</sub> | 650 <sub>542–5950</sub> | 650 <sub>542–5950</sub> |
+| cancel-hit | 2186595 | 136 <sub>108–137</sub> | 189 <sub>152–193</sub> | 253 <sub>205–258</sub> | 329 <sub>281–373</sub> | 5673 <sub>2327–8498</sub> | 88249 <sub>13397–95524</sub> |
+| response | 5000000 | 236 <sub>186–238</sub> | 347 <sub>270–363</sub> | 15216 <sub>676–17796</sub> | 78675 <sub>7825–488401</sub> | 367853 <sub>223744–1201830</sub> | 492000 <sub>375191–1367130</sub> |
+
+**w5-burst / map-m1**: churn 0.92 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 52, 52, 52, 51, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2388416 | 128 <sub>102–129</sub> | 172 <sub>136–173</sub> | 221 <sub>177–222</sub> | 279 <sub>234–293</sub> | 5610 <sub>5185–5625</sub> | 113450 <sub>75593–446826</sub> |
+| add-aggr-1 | 291615 | 100 <sub>80.3–102</sub> | 223 <sub>179–227</sub> | 301 <sub>244–306</sub> | 382 <sub>322–409</sub> | 5659 <sub>5294–6004</sub> | 29474 <sub>7702–118100</sub> |
+| add-aggr-2..4 | 132640 | 164 <sub>132–165</sub> | 284 <sub>230–287</sub> | 394 <sub>320–399</sub> | 520 <sub>435–558</sub> | 6290 <sub>5268–7288</sub> | 10899 <sub>7185–29609</sub> |
+| add-aggr-5+ | 734 | 362 <sub>285–376</sub> | 454 <sub>366–473</sub> | 585 <sub>439–638</sub> | 587 <sub>532–16646</sub> | 587 <sub>532–16646</sub> | 587 <sub>532–16646</sub> |
+| cancel-hit | 2186595 | 137 <sub>108–137</sub> | 191 <sub>153–193</sub> | 255 <sub>206–256</sub> | 328 <sub>283–357</sub> | 5665 <sub>5194–5836</sub> | 85777 <sub>7843–314548</sub> |
+| response | 5000000 | 235 <sub>186–236</sub> | 342 <sub>267–347</sub> | 2892 <sub>713–6506</sub> | 69817 <sub>7032–123744</sub> | 284383 <sub>84794–698082</sub> | 448181 <sub>129951–832719</sub> |
+
+**w5-burst / map-m2**: churn 0.92 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 52, 51, 52, 51, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2388416 | 123 <sub>97.7–124</sub> | 165 <sub>132–166</sub> | 214 <sub>172–215</sub> | 268 <sub>226–276</sub> | 5619 <sub>5159–5650</sub> | 51658 <sub>16482–100477</sub> |
+| add-aggr-1 | 291615 | 100 <sub>80.3–101</sub> | 210 <sub>169–211</sub> | 281 <sub>234–283</sub> | 355 <sub>316–362</sub> | 5528 <sub>5225–5662</sub> | 12530 <sub>5654–79905</sub> |
+| add-aggr-2..4 | 132640 | 159 <sub>129–160</sub> | 269 <sub>218–271</sub> | 365 <sub>304–371</sub> | 469 <sub>405–473</sub> | 5625 <sub>5151–16004</sub> | 7104 <sub>5968–42096</sub> |
+| add-aggr-5+ | 734 | 340 <sub>281–344</sub> | 433 <sub>346–442</sub> | 540 <sub>400–609</sub> | 576 <sub>439–654</sub> | 576 <sub>439–654</sub> | 576 <sub>439–654</sub> |
+| cancel-hit | 2186595 | 134 <sub>106–134</sub> | 187 <sub>150–188</sub> | 249 <sub>203–251</sub> | 327 <sub>279–329</sub> | 5682 <sub>5217–5710</sub> | 80750 <sub>26567–102359</sub> |
+| response | 5000000 | 231 <sub>182–232</sub> | 337 <sub>261–339</sub> | 2788 <sub>2173–10673</sub> | 70548 <sub>35160–224292</sub> | 310685 <sub>92968–1073240</sub> | 404313 <sub>143800–1259880</sub> |
+
+**w5-burst / dense**: churn 0.92 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 53, 52, 53, 57, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2388416 | 72.8 <sub>58.1–73.8</sub> | 93.1 <sub>73.8–93.1</sub> | 113 <sub>90.3–114</sub> | 163 <sub>147–178</sub> | 5499 <sub>4289–5508</sub> | 79469 <sub>12929–130320</sub> |
+| add-aggr-1 | 291615 | 94.2 <sub>76.0–94.9</sub> | 147 <sub>118–148</sub> | 180 <sub>147–181</sub> | 237 <sub>232–252</sub> | 5559 <sub>5174–6107</sub> | 13088 <sub>5905–20246</sub> |
+| add-aggr-2..4 | 132640 | 131 <sub>104–131</sub> | 199 <sub>159–199</sub> | 263 <sub>211–264</sub> | 350 <sub>284–368</sub> | 5608 <sub>4697–5756</sub> | 6223 <sub>5760–7029</sub> |
+| add-aggr-5+ | 734 | 260 <sub>209–267</sub> | 325 <sub>260–330</sub> | 395 <sub>296–421</sub> | 405 <sub>321–6296</sub> | 405 <sub>321–6296</sub> | 405 <sub>321–6296</sub> |
+| cancel-hit | 2186595 | 84.5 <sub>66.7–84.5</sub> | 106 <sub>84.9–107</sub> | 132 <sub>106–132</sub> | 162 <sub>133–164</sub> | 5502 <sub>1544–5533</sub> | 12758 <sub>6682–62660</sub> |
+| response | 5000000 | 180 <sub>142–180</sub> | 246 <sub>191–248</sub> | 2117 <sub>919–3975</sub> | 60045 <sub>20000–321278</sub> | 618447 <sub>91324–869406</sub> | 806226 <sub>130537–1059760</sub> |
+
+**w5-burst / hybrid**: churn 0.92 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 53, 52, 52, 52, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2388416 | 82.4 <sub>65.6–82.4</sub> | 105 <sub>83.5–106</sub> | 129 <sub>104–129</sub> | 189 <sub>177–210</sub> | 5516 <sub>1865–5528</sub> | 13748 <sub>12450–75638</sub> |
+| add-aggr-1 | 291615 | 99.2 <sub>80.3–101</sub> | 163 <sub>130–164</sub> | 202 <sub>166–203</sub> | 271 <sub>261–287</sub> | 5613 <sub>1820–5727</sub> | 12454 <sub>6384–31513</sub> |
+| add-aggr-2..4 | 132640 | 142 <sub>114–143</sub> | 219 <sub>177–220</sub> | 289 <sub>240–289</sub> | 381 <sub>342–427</sub> | 6278 <sub>5787–13904</sub> | 7540 <sub>7292–29769</sub> |
+| add-aggr-5+ | 734 | 284 <sub>231–292</sub> | 360 <sub>280–367</sub> | 426 <sub>329–443</sub> | 443 <sub>418–481</sub> | 443 <sub>418–481</sub> | 443 <sub>418–481</sub> |
+| cancel-hit | 2186595 | 86.0 <sub>68.1–86.0</sub> | 109 <sub>87.4–110</sub> | 132 <sub>107–132</sub> | 168 <sub>148–180</sub> | 5510 <sub>2123–5528</sub> | 14095 <sub>9024–92937</sub> |
+| response | 5000000 | 186 <sub>147–186</sub> | 255 <sub>199–256</sub> | 1741 <sub>484–7996</sub> | 28561 <sub>10816–243470</sub> | 195068 <sub>83607–1225940</sub> | 366594 <sub>122717–1377770</sub> |
+
+### Results: hybrid with a 4,096-tick window (separate session, compare with its own dense rows)
+
+**w1 / hybrid**: churn 0.08 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 45, 45, 45, 45, 45
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 5300656 | 144 <sub>142–145</sub> | 196 <sub>192–198</sub> | 359 <sub>355–361</sub> | 446 <sub>438–479</sub> | 7140 <sub>5182–7340</sub> | 123529 <sub>86057–286250</sub> |
+| add-aggr-1 | 328066 | 139 <sub>138–140</sub> | 210 <sub>206–211</sub> | 365 <sub>362–370</sub> | 459 <sub>453–491</sub> | 7226 <sub>5139–7591</sub> | 66990 <sub>12974–102645</sub> |
+| add-aggr-2..4 | 363393 | 160 <sub>156–161</sub> | 282 <sub>276–283</sub> | 435 <sub>431–439</sub> | 638 <sub>629–878</sub> | 7574 <sub>5231–8008</sub> | 15433 <sub>12758–42350</sub> |
+| add-aggr-5+ | 9093 | 286 <sub>281–287</sub> | 505 <sub>497–512</sub> | 769 <sub>721–797</sub> | 1058 <sub>946–1156</sub> | 4345 <sub>1138–5589</sub> | 4345 <sub>1138–5589</sub> |
+| cancel-hit | 2358547 | 232 <sub>224–242</sub> | 354 <sub>347–359</sub> | 529 <sub>525–532</sub> | 725 <sub>713–3775</sub> | 7842 <sub>7089–8013</sub> | 81278 <sub>70710–133027</sub> |
+| cancel-miss | 640245 | 144 <sub>142–146</sub> | 177 <sub>172–179</sub> | 351 <sub>344–351</sub> | 418 <sub>412–436</sub> | 7117 <sub>5159–7528</sub> | 25981 <sub>12614–120709</sub> |
+
+**w1 / dense**: churn 0.08 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 45, 45, 45, 45, 45
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 5300656 | 141 <sub>140–141</sub> | 189 <sub>187–190</sub> | 350 <sub>350–351</sub> | 417 <sub>415–431</sub> | 6832 <sub>5157–7123</sub> | 120377 <sub>78201–707893</sub> |
+| add-aggr-1 | 328066 | 139 <sub>138–139</sub> | 201 <sub>200–203</sub> | 351 <sub>351–356</sub> | 431 <sub>425–447</sub> | 7169 <sub>7060–7323</sub> | 23618 <sub>12486–121164</sub> |
+| add-aggr-2..4 | 363393 | 154 <sub>152–154</sub> | 266 <sub>262–268</sub> | 418 <sub>417–423</sub> | 607 <sub>590–621</sub> | 5296 <sub>5088–7283</sub> | 45595 <sub>12904–160774</sub> |
+| add-aggr-5+ | 9093 | 260 <sub>254–261</sub> | 482 <sub>481–495</sub> | 743 <sub>722–769</sub> | 1144 <sub>905–5499</sub> | 6903 <sub>4600–7551</sub> | 6903 <sub>4600–7551</sub> |
+| cancel-hit | 2358547 | 228 <sub>227–240</sub> | 344 <sub>342–351</sub> | 517 <sub>515–521</sub> | 680 <sub>657–722</sub> | 7785 <sub>7231–8550</sub> | 128472 <sub>114448–482044</sub> |
+| cancel-miss | 640245 | 144 <sub>144–146</sub> | 176 <sub>175–179</sub> | 347 <sub>346–349</sub> | 410 <sub>408–415</sub> | 5068 <sub>3901–7425</sub> | 16482 <sub>8246–78665</sub> |
+
+**w2-churn / hybrid**: churn 1.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2366359 | 47.1 <sub>47.1–47.4</sub> | 61.4 <sub>56.7–61.4</sub> | 77.4 <sub>71.7–78.1</sub> | 117 <sub>107–129</sub> | 333 <sub>299–352</sub> | 24830 <sub>12040–94310</sub> |
+| add-aggr-1 | 299095 | 74.6 <sub>72.4–74.6</sub> | 97.7 <sub>91.3–98.1</sub> | 131 <sub>117–134</sub> | 200 <sub>183–209</sub> | 569 <sub>384–4808</sub> | 12867 <sub>5954–55182</sub> |
+| add-aggr-2..4 | 7558 | 109 <sub>104–110</sub> | 144 <sub>134–146</sub> | 179 <sub>173–189</sub> | 209 <sub>205–255</sub> | 254 <sub>222–4904</sub> | 254 <sub>222–4904</sub> |
+| cancel-hit | 2326988 | 51.4 <sub>50.7–51.4</sub> | 67.4 <sub>63.9–67.8</sub> | 91.3 <sub>81.7–92.0</sub> | 117 <sub>104–118</sub> | 238 <sub>182–301</sub> | 59174 <sub>12857–84366</sub> |
+
+**w2-churn / dense**: churn 1.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2366359 | 42.1 <sub>41.7–42.1</sub> | 55.7 <sub>51.4–55.7</sub> | 72.4 <sub>67.4–72.4</sub> | 107 <sub>94.2–125</sub> | 284 <sub>229–369</sub> | 25714 <sub>12242–87806</sub> |
+| add-aggr-1 | 299095 | 64.9 <sub>63.9–64.9</sub> | 88.5 <sub>81.7–88.8</sub> | 123 <sub>108–125</sub> | 184 <sub>166–194</sub> | 499 <sub>349–1468</sub> | 9972 <sub>4840–58454</sub> |
+| add-aggr-2..4 | 7558 | 97.7 <sub>93.8–98.5</sub> | 132 <sub>122–134</sub> | 173 <sub>153–178</sub> | 222 <sub>201–339</sub> | 309 <sub>229–4835</sub> | 309 <sub>229–4835</sub> |
+| cancel-hit | 2326988 | 50.7 <sub>49.9–50.7</sub> | 65.6 <sub>62.8–65.6</sub> | 90.6 <sub>81.0–91.3</sub> | 116 <sub>99.2–118</sub> | 327 <sub>186–388</sub> | 15938 <sub>13650–62931</sub> |
+
+**w2-drift / hybrid**: churn 0.89 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2381063 | 96.0 <sub>95.6–96.3</sub> | 160 <sub>159–161</sub> | 208 <sub>206–210</sub> | 554 <sub>526–590</sub> | 4871 <sub>4808–4903</sub> | 57434 <sub>29467–386779</sub> |
+| add-aggr-1 | 288861 | 83.8 <sub>83.5–83.8</sub> | 123 <sub>122–124</sub> | 182 <sub>182–189</sub> | 1249 <sub>1247–1277</sub> | 4885 <sub>1566–5000</sub> | 10524 <sub>5483–96942</sub> |
+| add-aggr-2..4 | 12940 | 127 <sub>126–129</sub> | 195 <sub>192–203</sub> | 1245 <sub>1208–1290</sub> | 1491 <sub>1409–1561</sub> | 1709 <sub>1474–6187</sub> | 1709 <sub>1474–6187</sub> |
+| add-aggr-5+ | 3 | 273 <sub>260–320</sub> | 273 <sub>260–320</sub> | 273 <sub>260–320</sub> | 273 <sub>260–320</sub> | 273 <sub>260–320</sub> | 273 <sub>260–320</sub> |
+| cancel-hit | 2317133 | 79.6 <sub>79.6–79.6</sub> | 199 <sub>198–200</sub> | 257 <sub>255–259</sub> | 305 <sub>301–310</sub> | 4943 <sub>4891–4968</sub> | 74662 <sub>25565–100240</sub> |
+
+**w2-drift / dense**: churn 0.89 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2381063 | 49.9 <sub>49.2–49.9</sub> | 71.0 <sub>70.3–71.3</sub> | 99.9 <sub>97.7–102</sub> | 153 <sub>151–163</sub> | 388 <sub>373–410</sub> | 62613 <sub>14582–98159</sub> |
+| add-aggr-1 | 288861 | 72.4 <sub>71.7–73.1</sub> | 108 <sub>106–110</sub> | 168 <sub>162–177</sub> | 279 <sub>268–313</sub> | 4771 <sub>432–5456</sub> | 13442 <sub>7043–31953</sub> |
+| add-aggr-2..4 | 12940 | 112 <sub>111–113</sub> | 172 <sub>169–176</sub> | 266 <sub>260–320</sub> | 421 <sub>396–660</sub> | 664 <sub>459–13017</sub> | 664 <sub>459–13017</sub> |
+| add-aggr-5+ | 3 | 227 <sub>206–253</sub> | 227 <sub>206–253</sub> | 227 <sub>206–253</sub> | 227 <sub>206–253</sub> | 227 <sub>206–253</sub> | 227 <sub>206–253</sub> |
+| cancel-hit | 2317133 | 52.8 <sub>52.8–52.8</sub> | 72.4 <sub>71.7–72.8</sub> | 101 <sub>98.8–103</sub> | 137 <sub>134–142</sub> | 1410 <sub>194–4783</sub> | 76729 <sub>13274–96924</sub> |
+
+**w5-burst / hybrid**: churn 0.92 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 43, 42, 43, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2388416 | 65.3 <sub>64.9–65.6</sub> | 83.5 <sub>83.5–83.5</sub> | 103 <sub>102–103</sub> | 186 <sub>173–191</sub> | 4563 <sub>4181–5122</sub> | 43739 <sub>13383–99112</sub> |
+| add-aggr-1 | 291615 | 79.6 <sub>78.8–81.0</sub> | 130 <sub>129–130</sub> | 163 <sub>163–166</sub> | 280 <sub>237–305</sub> | 5205 <sub>4623–5442</sub> | 11426 <sub>6091–72504</sub> |
+| add-aggr-2..4 | 132640 | 113 <sub>113–114</sub> | 175 <sub>174–176</sub> | 234 <sub>231–239</sub> | 344 <sub>317–381</sub> | 5162 <sub>4532–5274</sub> | 7121 <sub>5144–11471</sub> |
+| add-aggr-5+ | 734 | 229 <sub>224–233</sub> | 294 <sub>280–300</sub> | 377 <sub>346–444</sub> | 411 <sub>357–1455</sub> | 411 <sub>357–1455</sub> | 411 <sub>357–1455</sub> |
+| cancel-hit | 2186595 | 68.1 <sub>68.1–68.1</sub> | 87.0 <sub>86.7–87.4</sub> | 106 <sub>106–107</sub> | 151 <sub>147–158</sub> | 5091 <sub>1501–5114</sub> | 46562 <sub>25959–148319</sub> |
+| response | 5000000 | 147 <sub>146–147</sub> | 197 <sub>197–198</sub> | 3108 <sub>2735–3381</sub> | 63059 <sub>45022–70411</sub> | 341917 <sub>164840–549041</sub> | 453688 <sub>330620–745500</sub> |
+
+**w5-burst / dense**: churn 0.92 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 45, 42, 44, 42, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2388416 | 57.1 <sub>57.1–57.4</sub> | 73.8 <sub>73.8–73.8</sub> | 90.3 <sub>89.9–90.6</sub> | 168 <sub>127–181</sub> | 4218 <sub>1575–5094</sub> | 44467 <sub>11606–92979</sub> |
+| add-aggr-1 | 291615 | 76.0 <sub>75.3–76.0</sub> | 117 <sub>117–117</sub> | 146 <sub>144–146</sub> | 225 <sub>204–237</sub> | 5094 <sub>1639–5165</sub> | 10921 <sub>5153–23692</sub> |
+| add-aggr-2..4 | 132640 | 104 <sub>103–105</sub> | 158 <sub>158–160</sub> | 213 <sub>209–215</sub> | 295 <sub>273–296</sub> | 5177 <sub>1448–5359</sub> | 13469 <sub>5257–86638</sub> |
+| add-aggr-5+ | 734 | 210 <sub>208–213</sub> | 266 <sub>252–270</sub> | 320 <sub>280–388</sub> | 347 <sub>320–568</sub> | 347 <sub>320–568</sub> | 347 <sub>320–568</sub> |
+| cancel-hit | 2186595 | 66.7 <sub>66.7–66.7</sub> | 84.5 <sub>84.5–84.9</sub> | 106 <sub>106–106</sub> | 142 <sub>128–152</sub> | 4403 <sub>441–5128</sub> | 25377 <sub>13475–58435</sub> |
+| response | 5000000 | 142 <sub>141–142</sub> | 190 <sub>188–192</sub> | 2744 <sub>395–4631</sub> | 56073 <sub>29543–200548</sub> | 309954 <sub>90685–1242740</sub> | 433418 <sub>285072–1586170</sub> |

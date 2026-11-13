@@ -355,7 +355,7 @@ Detailed plans live in [docs/plans/](docs/plans/).
 - [x] Standard layout, namespace, header-only target, presets, install/export
 - [x] Latency harness: TSC timer, log-linear histograms, CPU pinning, seeded workloads,
       zero-allocation test
-- [ ] Map-ladder tail: preallocated node resources, hybrid ladder (implemented; measurements pending)
+- [x] Map-ladder tail: preallocated node resources (M1, M2), hybrid ladder, measured (A3)
 - [ ] Cancel-path tail: direct order table with generation-checked handles, hardened hash index
 
 **Phase B: around the book** (one phase at a time)

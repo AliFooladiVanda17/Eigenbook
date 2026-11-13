@@ -1,6 +1,6 @@
 # Phase A: standard layout, latency harness, map-ladder tail, cancel-path tail
 
-Status: A0 done (recon); A1 done; A2 done (results provisional: unstable core clock); A3a (code + tests) done; A3b (measurements) next.
+Status: A0, A1, A2 (results provisional: unstable clock), A3 done; A4 next.
 
 ## A0 recon results
 
@@ -372,6 +372,22 @@ three.
   only place recentering runs.
 - Large price jumps: recentering slides at most `maxShiftsPerOp` ticks per add, so after a jump
   the touch lives in the overflow map (correct, map-speed) until the window catches up.
+
+### As built (A3)
+
+- `alignof(std::max_align_t)` is 8 with the MSVC ABI (16 on Linux x86-64); `FixedBlockResource`
+  serves requests up to that alignment and sends stricter ones to the counted fallback. Map nodes
+  need 8.
+- Hybrid window must fit below `INT64_MAX` (validated at construction; the recentering target is
+  clamped), found by the extreme-price test.
+- The default `OrderBook` stays M0 (baseline); no default change without the owner's decision.
+- Harness: `--book` list and `--hybrid-window`. A3b measured the hybrid at 16,384 ticks (main
+  session) and 4,096 ticks (second session): the window must cover the active band.
+- A3b ran on AC power with the Balanced plan (the owner did not switch plans); per-run clock
+  probes are in the tables. Only Clang was measured for A3.
+- Result: removing node allocation (M1 / M2) changes W2 latencies by ≤ 7 % (p50–p99) and ≤ 10 %
+  (p99.9); dense / hybrid are 2–3× faster than any map variant through p99.9. See
+  `docs/BENCHMARKS.md`, Phase A3.
 
 ## A4: cancel-path tail (outline)
 
