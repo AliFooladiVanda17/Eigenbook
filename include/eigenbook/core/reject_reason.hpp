@@ -17,6 +17,7 @@ enum class RejectReason : std::uint8_t {
     LEVEL_QUANTITY_LIMIT, // would take the quantity at its price above BookLimits::maxLevelQuantity
     PRICE_OUT_OF_BAND,    // limit price outside the instrument band [minPrice, maxPrice]
     NOTIONAL_LIMIT,       // |price| x quantity above BookLimits::maxNotional
+    NOT_OWNER,            // cancel / modify by a participant that does not own the order
 };
 
 } // namespace eigenbook

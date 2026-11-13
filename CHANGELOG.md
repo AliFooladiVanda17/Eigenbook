@@ -10,6 +10,12 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- Participants and trade ids: `ParticipantId`, `TradeId`; `Order::getParticipant()` (offset 60,
+  every `Order` field offset static-asserted); `OrderRequest::participant`,
+  `ModifyRequest::participant`; participant cancel `cancelOrder(id, participant)` and owner-only
+  modify, both rejecting with `NOT_OWNER`; `cancelOrder(id)` is the administrative cancel.
+  `Fill::tradeId` (per book, from 1) and `Fill::makerParticipant`; `lastTradeId()`. Requirements
+  FR-35, FR-36.
 - `BookLimits` (third constructor argument of every book): `maxOrderQuantity`,
   `maxLevelQuantity`, price band `minPrice`/`maxPrice`, `maxNotional`, `reserveOrders`, and a hard
   `maxOrders` that preallocates and rejects instead of growing. Reject reasons

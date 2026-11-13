@@ -45,7 +45,8 @@ public:
             const std::uint64_t traded = std::min(qty, best->qty);
             qty -= traded;
             best->qty -= traded;
-            fills.push_back({{best->id}, {id}, {best->price}, {traded}, side, best->qty == 0});
+            fills.push_back(
+                {{best->id}, {id}, {best->price}, {traded}, side, best->qty == 0, {++trades}});
             if (best->qty == 0) {
                 orders.erase(best);
             }
@@ -105,13 +106,15 @@ private:
     }
 
     std::uint64_t seq{0};
+    std::uint64_t trades{0}; // last trade id
 };
 
 bool sameFills(const std::vector<Fill>& a, const std::vector<Fill>& b) {
     return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](const Fill& x, const Fill& y) {
         return x.makerId == y.makerId && x.takerId == y.takerId && x.price == y.price &&
                x.quantity == y.quantity && x.takerSide == y.takerSide &&
-               x.makerFilled == y.makerFilled;
+               x.makerFilled == y.makerFilled && x.tradeId == y.tradeId &&
+               x.makerParticipant == y.makerParticipant;
     });
 }
 

@@ -16,14 +16,26 @@ Four commits, each with all tests green on MSVC and Clang (Debug, Release, sanit
 Known limit: with map ladder M0, a re-entering modify can still lose the order if the tree's node
 allocation throws `std::bad_alloc`; M1 / M2 / dense / hybrid cannot allocate there.
 
-## B1.2 Participant, ownership, trade id, sequence
+## B1.2 Participant, ownership, trade id
 
-`Order`: `uint16_t flags` at offset 58, `uint32_t participant` at offset 60 (offsets
-static-asserted; still 64 bytes). `ParticipantId` strong type; `OrderRequest` / `ModifyRequest`
-gain `participant`; `cancelOrder(const CancelRequest&)` checks it (`NOT_OWNER`), `cancelOrder(OrderId)`
-stays as the administrative cancel (no ownership check, documented). `Fill` gains `tradeId`
-(per-book, monotonic from 1) and `sequence`; `ExecutionResult` gains `sequence` (per-book output
-sequence; rejects are numbered by the sequencer in B3).
+As built (differs from the first draft of this plan; reasons inline):
+
+- `ParticipantId` (uint32) and `TradeId` (uint64) strong types. `Order::participant` at offset 60;
+  every field offset is static-asserted. Offsets 58–59 stay free: the flags field arrives with
+  B1.3, where it has a meaning (an unused private field also trips Clang's
+  `-Wunused-private-field`).
+- `OrderRequest` / `ModifyRequest` gain `participant` (last member, default 0, so existing
+  positional and designated initialisers still compile).
+- Participant cancel is `cancelOrder(OrderId, ParticipantId)` → `NOT_OWNER`. A
+  `cancelOrder(const CancelRequest&)` overload next to `cancelOrder(OrderId)` would make every
+  existing `cancelOrder({7})` call ambiguous (both are aggregates), so the request struct waits for
+  the sequencer's command types (B3). `cancelOrder(OrderId)` stays as the administrative cancel.
+- Modify checks ownership first (before quantity checks).
+- `Fill` gains `tradeId` (per book, from 1, +1 per execution) and `makerParticipant` (the maker is
+  gone once a full fill returns, so its execution report needs the owner from the fill).
+- Deferred: a per-book output sequence on `Fill` / `ExecutionResult`. Cancels return only a
+  quantity, so a sequence on results alone would have gaps nobody can see; the numbering of every
+  input and output belongs to the sequencer (B3) and market data (B8).
 
 ## B1.3 Time in force and qualifiers
 

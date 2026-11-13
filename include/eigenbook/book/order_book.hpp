@@ -33,6 +33,7 @@ struct OrderRequest {
     // Caller time, kept for reporting. Not used for priority: a resting order gets the book's own
     // priority sequence (Order::getTimestamp()); input time comes from the sequencer (Phase B3).
     Timestamp timestamp{0};
+    ParticipantId participant{0}; // owner of the order; checked by cancel and modify
 };
 
 // New price and/or quantity for a resting order. Reducing the quantity at the same price keeps
@@ -41,7 +42,8 @@ struct ModifyRequest {
     OrderId id;
     Price price;
     Quantity quantity;
-    Timestamp timestamp{0}; // caller time (see OrderRequest::timestamp)
+    Timestamp timestamp{0};       // caller time (see OrderRequest::timestamp)
+    ParticipantId participant{0}; // must own the order (NOT_OWNER)
 };
 
 // One execution between the incoming (taker) and a resting (maker) order, at the maker's price.
@@ -51,7 +53,9 @@ struct Fill {
     Price price;
     Quantity quantity;
     OrderSide takerSide;
-    bool makerFilled; // the maker left the book
+    bool makerFilled;                  // the maker left the book
+    TradeId tradeId{0};                // per book, monotonic from 1
+    ParticipantId makerParticipant{0}; // owner of the maker order (its execution report)
 };
 
 // How the quantity of an accepted request was disposed of: filled + resting + cancelled equals
@@ -115,9 +119,15 @@ public:
 
     Result addOrder(const OrderRequest& request) { return addOrder(request, NoFillHandler{}); }
 
-    // Removes a resting order in O(1); returns the quantity that was still open.
+    // Participant cancel: removes a resting order of `participant` in O(1) and returns the quantity
+    // that was still open. NOT_OWNER if another participant owns it (the order is untouched).
+    std::expected<Quantity, RejectReason> cancelOrder(OrderId id, ParticipantId participant);
+
+    // Administrative cancel (engine, risk, kill switch): no ownership check. Not for requests that
+    // arrive from a participant session.
     std::expected<Quantity, RejectReason> cancelOrder(OrderId id);
 
+    // Only the owner (request.participant) may modify; NOT_OWNER otherwise.
     template <typename OnFill>
     Result modifyOrder(const ModifyRequest& request, OnFill&& onFill);
 
@@ -138,6 +148,9 @@ public:
     [[nodiscard]] InstrumentId instrument() const noexcept { return instrumentId; }
 
     [[nodiscard]] const BookLimits& bookLimits() const noexcept { return limits; }
+
+    // Id of the most recent execution; TradeId{0} before the first one.
+    [[nodiscard]] TradeId lastTradeId() const noexcept { return {tradeSequence}; }
 
     // Number of resting orders on both sides.
     [[nodiscard]] std::size_t orderCount() const noexcept { return index.size(); }
@@ -248,6 +261,8 @@ private:
     // Priority sequence of resting orders: stamped into Order::timestamp when an order rests or
     // re-enters. Monotonic per book; the engine-wide sequence arrives with the sequencer (B3).
     std::uint64_t prioritySequence{0};
+    // Last TradeId issued.
+    std::uint64_t tradeSequence{0};
 };
 
 // Sparse / unbounded prices (map ladder M0: nodes from a pool over the heap).
@@ -417,12 +432,32 @@ auto BasicOrderBook<Ladder, Locator>::cancelOrder(const OrderId id)
 template <template <OrderSide> class Ladder, typename Locator>
     requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
              OrderLocator<Locator>
+auto BasicOrderBook<Ladder, Locator>::cancelOrder(const OrderId id, const ParticipantId participant)
+    -> std::expected<Quantity, RejectReason> {
+    Order* order = index.find(id);
+    if (order == nullptr) [[unlikely]] {
+        return std::unexpected(RejectReason::UNKNOWN_ORDER_ID);
+    }
+    if (order->getParticipant() != participant) [[unlikely]] {
+        return std::unexpected(RejectReason::NOT_OWNER);
+    }
+    const Quantity open = order->getQuantity();
+    removeResting(*order);
+    return open;
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
 template <typename OnFill>
 auto BasicOrderBook<Ladder, Locator>::modifyOrder(const ModifyRequest& request, OnFill&& onFill)
     -> Result {
     Order* order = index.find(request.id);
     if (order == nullptr) [[unlikely]] {
         return std::unexpected(RejectReason::UNKNOWN_ORDER_ID);
+    }
+    if (order->getParticipant() != request.participant) [[unlikely]] {
+        return std::unexpected(RejectReason::NOT_OWNER);
     }
     if (request.quantity.isZero()) [[unlikely]] {
         return std::unexpected(RejectReason::INVALID_QUANTITY);
@@ -450,7 +485,8 @@ auto BasicOrderBook<Ladder, Locator>::modifyOrder(const ModifyRequest& request, 
                                .type = OrderType::LIMIT,
                                .price = request.price,
                                .quantity = request.quantity,
-                               .timestamp = request.timestamp};
+                               .timestamp = request.timestamp,
+                               .participant = order->getParticipant()};
     detachForReentry(*order); // the locator keeps the id valid (unbind), so no admission is needed
     return execute(reentry, onFill);
 }
@@ -495,7 +531,9 @@ Quantity BasicOrderBook<Ladder, Locator>::sweep(const OrderId takerId,
                         .price = levelPrice,
                         .quantity = traded,
                         .takerSide = TakerSide,
-                        .makerFilled = makerFilled});
+                        .makerFilled = makerFilled,
+                        .tradeId = {++tradeSequence},
+                        .makerParticipant = maker.getParticipant()});
 
             if (makerFilled) {
                 level->popFront();
@@ -523,7 +561,8 @@ void BasicOrderBook<Ladder, Locator>::rest(const OrderRequest& request, const Qu
                                OrderType::LIMIT,
                                request.price,
                                quantity,
-                               Timestamp{++prioritySequence});
+                               Timestamp{++prioritySequence},
+                               request.participant);
     // Index growth or a new tree level can allocate; never leave a half-linked node behind.
     try {
         index.insert(request.id, order);

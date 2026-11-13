@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <type_traits>
 
 #include <eigenbook/core/types.hpp>
@@ -20,13 +21,15 @@ public:
           const OrderType iType,
           const Price iPrice,
           const Quantity iQuantity,
-          const Timestamp iTimestamp) noexcept
+          const Timestamp iTimestamp,
+          const ParticipantId iParticipant = ParticipantId{0}) noexcept
         : id(iId)
         , price(iPrice)
         , quantity(iQuantity)
         , timestamp(iTimestamp)
         , side(iSide)
-        , type(iType) {}
+        , type(iType)
+        , participant(iParticipant) {}
 
     Order(const Order&) = delete;
     Order& operator=(const Order&) = delete;
@@ -48,6 +51,8 @@ public:
 
     [[nodiscard]] Timestamp getTimestamp() const noexcept { return timestamp; }
 
+    [[nodiscard]] ParticipantId getParticipant() const noexcept { return participant; }
+
     [[nodiscard]] bool isFilled() const noexcept { return quantity.isZero(); }
 
     // Next order in time priority at the same price, or nullptr.
@@ -56,6 +61,7 @@ public:
 private:
     // Quantity and links change only through PriceLevel, which keeps the level aggregate in sync.
     friend class PriceLevel;
+    friend struct OrderLayout;
 
     Order* prev{nullptr};
     Order* next{nullptr};
@@ -67,10 +73,28 @@ private:
     Timestamp timestamp;
     OrderSide side;
     OrderType type;
+    // Offsets 58-59 are free (time-in-force flags, Phase B1.3).
+    ParticipantId participant;
 };
 
 // The README's name for the book's node type.
 using OrderNode = Order;
+
+// The field layout is part of the design (the matching loop reads links, id and quantity from one
+// line); later phases put new fields into the gaps named here, so every offset is checked.
+struct OrderLayout {
+    static_assert(std::is_standard_layout_v<Order>);
+    static_assert(offsetof(Order, prev) == 0);
+    static_assert(offsetof(Order, next) == 8);
+    static_assert(offsetof(Order, level) == 16);
+    static_assert(offsetof(Order, id) == 24);
+    static_assert(offsetof(Order, price) == 32);
+    static_assert(offsetof(Order, quantity) == 40);
+    static_assert(offsetof(Order, timestamp) == 48);
+    static_assert(offsetof(Order, side) == 56);
+    static_assert(offsetof(Order, type) == 57);
+    static_assert(offsetof(Order, participant) == 60);
+};
 
 static_assert(sizeof(Order) == kCacheLineSize, "Order must occupy exactly one cache line");
 static_assert(std::is_trivially_destructible_v<Order>,

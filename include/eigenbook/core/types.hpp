@@ -68,6 +68,22 @@ struct Timestamp {
     constexpr auto operator<=>(const Timestamp&) const noexcept = default;
 };
 
+// The participant (trading account) that owns an order. Assigned by the gateway, which has already
+// authenticated the session; the book only compares it. 0 is an ordinary value, the default for
+// single-participant use.
+struct ParticipantId {
+    std::uint32_t value;
+
+    constexpr auto operator<=>(const ParticipantId&) const noexcept = default;
+};
+
+// Identifies one execution. Per book, monotonic from 1; never reused.
+struct TradeId {
+    std::uint64_t value;
+
+    constexpr auto operator<=>(const TradeId&) const noexcept = default;
+};
+
 // Stable, pre-resolved instrument handle (Symbol -> InstrumentId happens on the cold path).
 struct InstrumentId {
     std::uint32_t value;

@@ -18,6 +18,7 @@ add_executable(eigenbook_tests
         unit/locator_test.cpp
         unit/locator_book_test.cpp
         unit/limits_test.cpp
+        unit/participant_test.cpp
         differential/differential_test.cpp
 )
 

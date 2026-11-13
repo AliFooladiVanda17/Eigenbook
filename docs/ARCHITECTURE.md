@@ -80,12 +80,14 @@ that into `CAPACITY_EXCEEDED` **before** any matching (add) or any change (modif
 | 24 | `id` | 8 |
 | 32 | `price` | 8 |
 | 40 | `quantity` | 8 |
-| 48 | `timestamp` | 8 |
+| 48 | `timestamp` (book priority sequence) | 8 |
 | 56 | `side` | 1 |
 | 57 | `type` | 1 |
-| 58–63 | free | 6 |
+| 58–59 | free (time-in-force flags, B1.3) | 2 |
+| 60 | `participant` | 4 |
 
 The links used while walking a queue and the fields read while matching share one cache line.
+Every offset is `static_assert`ed (`OrderLayout` in `core/order.hpp`).
 
 ### Matching model
 
