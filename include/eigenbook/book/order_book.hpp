@@ -15,6 +15,8 @@
 #include <eigenbook/book/locator/order_locator.hpp>
 #include <eigenbook/book/price_ladder.hpp>
 #include <eigenbook/book/price_level.hpp>
+#include <eigenbook/core/book_limits.hpp>
+#include <eigenbook/core/checked_math.hpp>
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/reject_reason.hpp>
 #include <eigenbook/core/types.hpp>
@@ -28,6 +30,8 @@ struct OrderRequest {
     OrderType type;
     Price price{0}; // ignored for MARKET orders
     Quantity quantity;
+    // Caller time, kept for reporting. Not used for priority: a resting order gets the book's own
+    // priority sequence (Order::getTimestamp()); input time comes from the sequencer (Phase B3).
     Timestamp timestamp{0};
 };
 
@@ -37,7 +41,7 @@ struct ModifyRequest {
     OrderId id;
     Price price;
     Quantity quantity;
-    Timestamp timestamp{0}; // arrival time used if the order loses priority
+    Timestamp timestamp{0}; // caller time (see OrderRequest::timestamp)
 };
 
 // One execution between the incoming (taker) and a resting (maker) order, at the maker's price.
@@ -86,10 +90,15 @@ public:
     using LadderConfig = typename BidLadder::Config;
     using Result = std::expected<ExecutionResult, RejectReason>;
 
-    // expectedOrders sizes the order pool and index so steady-state trading does not allocate.
+    // limits: hard per-instrument limits and the order storage to preallocate (BookLimits).
     explicit BasicOrderBook(InstrumentId iInstrument,
                             LadderConfig config = {},
-                            std::size_t expectedOrders = 1024);
+                            BookLimits limits = {});
+
+    // Shorthand for BookLimits{.reserveOrders = expectedOrders}: storage preallocated for
+    // expectedOrders and allowed to grow beyond it.
+    BasicOrderBook(InstrumentId iInstrument, LadderConfig config, std::size_t expectedOrders)
+        : BasicOrderBook(iInstrument, config, BookLimits{.reserveOrders = expectedOrders}) {}
 
     // Orders, levels and the index point at each other: a book never changes address.
     BasicOrderBook(const BasicOrderBook&) = delete;
@@ -128,6 +137,8 @@ public:
 
     [[nodiscard]] InstrumentId instrument() const noexcept { return instrumentId; }
 
+    [[nodiscard]] const BookLimits& bookLimits() const noexcept { return limits; }
+
     // Number of resting orders on both sides.
     [[nodiscard]] std::size_t orderCount() const noexcept { return index.size(); }
 
@@ -163,6 +174,29 @@ private:
     Quantity sweep(OrderId takerId, OrderType type, Price limit, Quantity quantity, OnFill& onFill);
 
     void rest(const OrderRequest& request, Quantity quantity);
+
+    // Every check a new order must pass, before any mutation.
+    [[nodiscard]] std::optional<RejectReason>
+    validateNew(const OrderRequest& request) const noexcept;
+
+    // Checks that `quantity` could rest at `price` on `side`: band, ladder range, notional, level
+    // quantity, ladder capacity, order capacity. `replacing` is an order that is removed first
+    // (modify re-entry); the level quantity, level and storage it frees are counted.
+    [[nodiscard]] std::optional<RejectReason>
+    validateResting(OrderSide side,
+                    Price price,
+                    Quantity quantity,
+                    const Order* replacing) const noexcept;
+
+    // Matches and rests a request that has passed validation. Cannot reject; with map ladder M0 a
+    // new tree node can still throw std::bad_alloc.
+    template <typename OnFill>
+    Result execute(const OrderRequest& request, OnFill& onFill);
+
+    [[nodiscard]] const PriceLevel* levelAt(const OrderSide side,
+                                            const Price price) const noexcept {
+        return side == OrderSide::BUY ? bidLadder.findLevel(price) : askLadder.findLevel(price);
+    }
 
     void removeResting(Order& order) noexcept;
 
@@ -206,10 +240,14 @@ private:
     }
 
     InstrumentId instrumentId;
+    BookLimits limits;
     ObjectPool<Order> pool;
     Locator index;
     BidLadder bidLadder;
     AskLadder askLadder;
+    // Priority sequence of resting orders: stamped into Order::timestamp when an order rests or
+    // re-enters. Monotonic per book; the engine-wide sequence arrives with the sequencer (B3).
+    std::uint64_t prioritySequence{0};
 };
 
 // Sparse / unbounded prices (map ladder M0: nodes from a pool over the heap).
@@ -242,13 +280,78 @@ template <template <OrderSide> class Ladder, typename Locator>
                  OrderLocator<Locator>
 BasicOrderBook<Ladder, Locator>::BasicOrderBook(const InstrumentId iInstrument,
                                                 const LadderConfig config,
-                                                const std::size_t expectedOrders)
+                                                const BookLimits iLimits)
     : instrumentId(iInstrument)
-    , pool(std::clamp<std::size_t>(expectedOrders, 64, 4096))
-    , index(expectedOrders)
+    , limits(iLimits)
+    , pool(std::clamp<std::size_t>(iLimits.orderCapacity(), 64, 4096))
+    , index(iLimits.orderCapacity())
     , bidLadder(config)
     , askLadder(config) {
-    pool.reserve(expectedOrders);
+    pool.reserve(iLimits.orderCapacity());
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+auto BasicOrderBook<Ladder, Locator>::validateNew(const OrderRequest& request) const noexcept
+    -> std::optional<RejectReason> {
+    if (request.quantity.isZero()) [[unlikely]] {
+        return RejectReason::INVALID_QUANTITY;
+    }
+    if (request.quantity > limits.maxOrderQuantity) [[unlikely]] {
+        return RejectReason::ORDER_QUANTITY_LIMIT;
+    }
+    // The id must be storable if the order ends up resting.
+    if (const Admission admission = index.admit(request.id); admission != Admission::OK)
+        [[unlikely]] {
+        return rejectFor(admission);
+    }
+    if (request.type == OrderType::LIMIT) {
+        return validateResting(request.side, request.price, request.quantity, nullptr);
+    }
+    return std::nullopt;
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+auto BasicOrderBook<Ladder, Locator>::validateResting(const OrderSide side,
+                                                      const Price price,
+                                                      const Quantity quantity,
+                                                      const Order* replacing) const noexcept
+    -> std::optional<RejectReason> {
+    if (price < limits.minPrice || price > limits.maxPrice) [[unlikely]] {
+        return RejectReason::PRICE_OUT_OF_BAND;
+    }
+    if (!accepts(side, price)) [[unlikely]] {
+        return RejectReason::PRICE_OUT_OF_RANGE;
+    }
+    if (!notionalWithin(price, quantity, limits.maxNotional)) [[unlikely]] {
+        return RejectReason::NOTIONAL_LIMIT;
+    }
+    // Conservative (all checks below): they assume the whole quantity rests, so an order that
+    // would trade in full can be rejected by them too.
+    const PriceLevel* level = levelAt(side, price);
+    const PriceLevel* ownLevel =
+        replacing != nullptr ? PriceLevel::ownerOf(const_cast<Order&>(*replacing)) : nullptr;
+    Quantity atLevel = level != nullptr ? level->quantity() : Quantity{0};
+    if (level != nullptr && level == ownLevel) {
+        atLevel -= replacing->getQuantity();
+    }
+    if (!sumWithin(atLevel, quantity, limits.maxLevelQuantity)) [[unlikely]] {
+        return RejectReason::LEVEL_QUANTITY_LIMIT;
+    }
+    // A full ladder only takes the order if its level exists, or if the order being replaced frees
+    // a level on this side.
+    const bool freesOwnLevel = ownLevel != nullptr && ownLevel->orderCount() == 1;
+    if (!canRestAt(side, price) && !freesOwnLevel) [[unlikely]] {
+        return RejectReason::CAPACITY_EXCEEDED;
+    }
+    if (replacing == nullptr && limits.maxOrders != 0 && index.size() >= limits.maxOrders)
+        [[unlikely]] {
+        return RejectReason::CAPACITY_EXCEEDED;
+    }
+    return std::nullopt;
 }
 
 template <template <OrderSide> class Ladder, typename Locator>
@@ -257,23 +360,19 @@ template <template <OrderSide> class Ladder, typename Locator>
 template <typename OnFill>
 auto BasicOrderBook<Ladder, Locator>::addOrder(const OrderRequest& request, OnFill&& onFill)
     -> Result {
-    if (request.quantity.isZero()) [[unlikely]] {
-        return std::unexpected(RejectReason::INVALID_QUANTITY);
+    // Every check happens before any mutation: a rejected order leaves the book untouched.
+    if (const std::optional<RejectReason> reject = validateNew(request)) [[unlikely]] {
+        return std::unexpected(*reject);
     }
-    // Before any matching: the id must be storable if the order ends up resting.
-    if (const Admission admission = index.admit(request.id); admission != Admission::OK)
-        [[unlikely]] {
-        return std::unexpected(rejectFor(admission));
-    }
-    if (request.type == OrderType::LIMIT && !accepts(request.side, request.price)) [[unlikely]] {
-        return std::unexpected(RejectReason::PRICE_OUT_OF_RANGE);
-    }
-    // Checked before any matching, so a full ladder is a clean reject. Conservative: a limit order
-    // that would trade in full never needs a new level, but is rejected too when its side is full.
-    if (request.type == OrderType::LIMIT && !canRestAt(request.side, request.price)) [[unlikely]] {
-        return std::unexpected(RejectReason::CAPACITY_EXCEEDED);
-    }
+    return execute(request, onFill);
+}
 
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+template <typename OnFill>
+auto BasicOrderBook<Ladder, Locator>::execute(const OrderRequest& request, OnFill& onFill)
+    -> Result {
     const Quantity remaining = request.side == OrderSide::BUY
                                    ? sweep<OrderSide::BUY>(request.id,
                                                            request.type,
@@ -328,31 +427,32 @@ auto BasicOrderBook<Ladder, Locator>::modifyOrder(const ModifyRequest& request, 
     if (request.quantity.isZero()) [[unlikely]] {
         return std::unexpected(RejectReason::INVALID_QUANTITY);
     }
+    if (request.quantity > limits.maxOrderQuantity) [[unlikely]] {
+        return std::unexpected(RejectReason::ORDER_QUANTITY_LIMIT);
+    }
 
-    if (request.price == order->getPrice()) {
-        if (request.quantity <= order->getQuantity()) {
-            // Same price, not larger: O(1) in place, time priority kept.
-            PriceLevel::ownerOf(*order)->reduce(*order, request.quantity);
-            return ExecutionResult{.resting = request.quantity};
-        }
-    } else if (!accepts(order->getSide(), request.price)) [[unlikely]] {
-        return std::unexpected(RejectReason::PRICE_OUT_OF_RANGE);
-    } else if (!canRestAt(order->getSide(), request.price) &&
-               PriceLevel::ownerOf(*order)->orderCount() != 1) [[unlikely]] {
-        // The new price needs a new level and the ladder is full; removing the order would not
-        // free its level either. Rejected before anything changes: the order stays as it was.
-        return std::unexpected(RejectReason::CAPACITY_EXCEEDED);
+    if (request.price == order->getPrice() && request.quantity <= order->getQuantity()) {
+        // Same price, not larger: O(1) in place, time priority kept. Only lowers aggregates.
+        PriceLevel::ownerOf(*order)->reduce(*order, request.quantity);
+        return ExecutionResult{.resting = request.quantity};
     }
 
     // Price change or size increase: the order loses priority and re-enters (it may cross).
+    // All-or-nothing: the re-entry is validated completely, counting what the order itself frees,
+    // before the order is touched; afterwards nothing can reject it.
+    if (const std::optional<RejectReason> reject =
+            validateResting(order->getSide(), request.price, request.quantity, order))
+        [[unlikely]] {
+        return std::unexpected(*reject);
+    }
     const OrderRequest reentry{.id = request.id,
                                .side = order->getSide(),
                                .type = OrderType::LIMIT,
                                .price = request.price,
                                .quantity = request.quantity,
                                .timestamp = request.timestamp};
-    detachForReentry(*order);
-    return addOrder(reentry, std::forward<OnFill>(onFill));
+    detachForReentry(*order); // the locator keeps the id valid (unbind), so no admission is needed
+    return execute(reentry, onFill);
 }
 
 template <template <OrderSide> class Ladder, typename Locator>
@@ -423,7 +523,7 @@ void BasicOrderBook<Ladder, Locator>::rest(const OrderRequest& request, const Qu
                                OrderType::LIMIT,
                                request.price,
                                quantity,
-                               request.timestamp);
+                               Timestamp{++prioritySequence});
     // Index growth or a new tree level can allocate; never leave a half-linked node behind.
     try {
         index.insert(request.id, order);

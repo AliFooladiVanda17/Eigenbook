@@ -16,6 +16,8 @@ target_sources(eigenbook_book
         ${PROJECT_SOURCE_DIR}/include/eigenbook/core/types.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/core/order.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/core/reject_reason.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/core/book_limits.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/core/checked_math.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/price_level.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/price_ladder.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/map_ladder.hpp
@@ -78,3 +80,16 @@ target_link_libraries(eigenbook_platform PRIVATE $<BUILD_INTERFACE:eigenbook_war
 add_library(eigenbook INTERFACE)
 add_library(Eigenbook::eigenbook ALIAS eigenbook)
 target_link_libraries(eigenbook INTERFACE eigenbook_book eigenbook_platform)
+
+# --- Guard: every public header is installed ------------------------------------------------------
+# A header missing from a FILE_SET still works in this build tree (the include directory is on the
+# path) but is not installed, which only the package_consumer test would notice. Fail at configure
+# time instead.
+file(GLOB_RECURSE _eigenbook_public_headers CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/include/eigenbook/*.hpp)
+get_target_property(_eigenbook_book_headers eigenbook_book HEADER_SET_HEADERS)
+get_target_property(_eigenbook_platform_headers eigenbook_platform HEADER_SET_HEADERS)
+foreach (header IN LISTS _eigenbook_public_headers)
+    if (NOT header IN_LIST _eigenbook_book_headers AND NOT header IN_LIST _eigenbook_platform_headers)
+        message(FATAL_ERROR "Public header not in any FILE_SET (it would not be installed): ${header}")
+    endif ()
+endforeach ()

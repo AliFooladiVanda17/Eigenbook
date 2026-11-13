@@ -17,6 +17,7 @@ add_executable(eigenbook_tests
         unit/hybrid_ladder_test.cpp
         unit/locator_test.cpp
         unit/locator_book_test.cpp
+        unit/limits_test.cpp
         differential/differential_test.cpp
 )
 

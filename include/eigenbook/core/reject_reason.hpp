@@ -13,6 +13,10 @@ enum class RejectReason : std::uint8_t {
     CAPACITY_EXCEEDED, // the order would need a new price level (or locator slot) that is not there
     INVALID_ORDER_ID,  // the book issues ids and did not issue this one, or it is stale
     ORDER_ID_REJECTED, // the hardened index refuses an id it could only store too far from home
+    ORDER_QUANTITY_LIMIT, // quantity above BookLimits::maxOrderQuantity
+    LEVEL_QUANTITY_LIMIT, // would take the quantity at its price above BookLimits::maxLevelQuantity
+    PRICE_OUT_OF_BAND,    // limit price outside the instrument band [minPrice, maxPrice]
+    NOTIONAL_LIMIT,       // |price| x quantity above BookLimits::maxNotional
 };
 
 } // namespace eigenbook

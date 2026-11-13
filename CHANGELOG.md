@@ -10,6 +10,13 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- `BookLimits` (third constructor argument of every book): `maxOrderQuantity`,
+  `maxLevelQuantity`, price band `minPrice`/`maxPrice`, `maxNotional`, `reserveOrders`, and a hard
+  `maxOrders` that preallocates and rejects instead of growing. Reject reasons
+  `ORDER_QUANTITY_LIMIT`, `LEVEL_QUANTITY_LIMIT`, `PRICE_OUT_OF_BAND`, `NOTIONAL_LIMIT`. Checked
+  arithmetic helpers in `core/checked_math.hpp`. Requirements FR-09, FR-29, FR-34; plan
+  `docs/plans/PHASE-B1.md`.
+- Configure fails if a public header is missing from the installed file sets (NFR-11).
 - Order locators (`OrderLocator` concept; `BasicOrderBook<Ladder, Locator = OrderIndex>`):
   `DirectOrderTable` (engine-issued handles = generation ∥ slot, `reserveOrderId()` /
   `releaseOrderId()`, O(1) worst-case lookup, stale handles rejected) and `HardenedOrderIndex`
@@ -96,3 +103,7 @@ no release yet; the CMake project version is 0.1.0.
 
 - MSVC warning C4324 in `ObjectPool` is suppressed locally with a documented reason; the build is
   warning-free under `/W4 /permissive-` and under Clang's extended warning set.
+- The dense ladder's range check no longer overflows on extreme prices (`INT64_MIN`, `INT64_MAX`
+  against a positive `minPrice`); it computes the offset in unsigned arithmetic.
+- A modify that changes price or grows quantity is all-or-nothing: every limit and capacity check
+  runs before the order is detached, so a rejected modify leaves it resting unchanged.

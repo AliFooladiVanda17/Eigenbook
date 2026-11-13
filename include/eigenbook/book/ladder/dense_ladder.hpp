@@ -53,8 +53,9 @@ public:
     ~ArrayPriceLadder() = default;
 
     [[nodiscard]] bool accepts(const Price price) const noexcept {
-        // Unsigned wrap folds the "below minPrice" check into the upper-bound check.
-        return static_cast<std::uint64_t>(price - minPrice) < tickCount;
+        // Offset in unsigned (modular) arithmetic: defined for every int64 price, and a price below
+        // minPrice wraps to a huge offset, so one comparison checks both ends of the range.
+        return offsetOf(price) < tickCount;
     }
 
     // Every tick in range has a preallocated level, so capacity is the range itself.
@@ -149,8 +150,12 @@ public:
     }
 
 private:
+    [[nodiscard]] std::uint64_t offsetOf(const Price price) const noexcept {
+        return static_cast<std::uint64_t>(price.value) - static_cast<std::uint64_t>(minPrice.value);
+    }
+
     [[nodiscard]] std::size_t indexOf(const Price price) const noexcept {
-        return static_cast<std::size_t>(price - minPrice);
+        return static_cast<std::size_t>(offsetOf(price));
     }
 
     [[nodiscard]] static constexpr bool isBetterIndex(const std::size_t a,
