@@ -1,0 +1,116 @@
+﻿CPU            : 13th Gen Intel(R) Core(TM) i7-13650HX (GenuineIntel)
+Logical CPUs   : 20 (14 cores, hybrid: 12 logical CPUs on P-cores)
+Pinned to      : CPU 2 (P-core)
+Priority       : HIGH_PRIORITY_CLASS + THREAD_PRIORITY_TIME_CRITICAL
+OS             : Windows 10.0.26200
+Power policy   : Balanced
+Power source   : AC
+Large pages    : not available
+Invariant TSC  : yes
+TSC frequency  : 2.8032 GHz (calibrated over 1 s, spread 1.24501e-05 %)
+Timer overhead : min 39, p50 52, p99 65 TSC ticks (empty tscStart/tscStop pair, not subtracted)
+Compiler       : Clang 21.1.8
+Build type     : Release
+Flags          :  -O3 -DNDEBUG
+Git            : 10a5586f8f5c-dirty
+Hybrid window  : 16384 ticks (--hybrid-window)
+
+w3-cancel70 / dense (70% cancels at front/middle/back, 2% misses; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 10; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 51/52/42/53/42)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive              1467934     63.2    59.2 [51.4-59.9]    83.1 [75.3-83.8]       113 [107-115]       166 [163-173]  18150 [1539-19349] 41992 [23207-70838]
+  cancel-hit-front         1143558     74.6    66.4 [61.0-68.1]     99.9 [92.4-102]       147 [137-150]       202 [197-207]   18253 [539-19600]40569 [10634-123050]
+  cancel-hit-middle        1143553     67.4    60.3 [54.9-61.4]    92.4 [85.3-94.2]       138 [128-140]       193 [189-197]  18070 [5040-19064] 23727 [19342-43620]
+  cancel-hit-back          1145020     63.0    56.4 [52.1-58.1]    78.1 [72.8-80.6]       112 [104-115]       152 [148-157]   18196 [586-19554] 24505 [15148-38713]
+  cancel-miss                99935     45.6    42.8 [37.8-43.5]    56.4 [52.8-57.8]    80.3 [76.0-82.4]       115 [109-138]    4991 [182-20274]   20565 [282-25460]
+
+w3-cancel70 / dense-hardened (70% cancels at front/middle/back, 2% misses; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 9; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 51/51/49/50/43)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive              1467934     64.3    59.6 [52.8-61.7]    84.5 [76.7-86.7]       113 [109-118]       176 [169-190]   5040 [2026-19212]97796 [26992-314300]
+  cancel-hit-front         1143558     76.0    68.1 [63.1-71.7]      103 [96.0-108]       151 [142-158]       207 [203-227]  10040 [4874-19303]40874 [27587-127146]
+  cancel-hit-middle        1143553     67.5    61.4 [55.7-63.5]    93.8 [87.8-99.9]       142 [133-147]       197 [194-208]   7488 [2494-19349]41695 [30589-300919]
+  cancel-hit-back          1145020     64.3    59.2 [54.9-62.4]    82.4 [76.7-86.3]       117 [110-122]       161 [156-177]    9908 [529-19143]82311 [15019-154666]
+  cancel-miss                99935     46.2    41.4 [36.7-42.1]    55.7 [53.2-57.8]    81.0 [78.1-88.5]       119 [111-134]   18162 [347-19166]  19255 [1450-25988]
+
+w3-cancel70 / dense-direct (70% cancels at front/middle/back, 2% misses; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 0; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 51/51/52/52/45)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive              1467934     43.5    41.0 [38.5-41.4]    49.9 [47.8-49.9]    57.8 [56.0-58.9]    69.6 [68.8-76.7]    5000 [372-18755] 39894 [23751-66963]
+  cancel-hit-front         1143558     53.6    52.1 [47.1-52.1]    61.7 [58.9-62.1]    68.1 [68.1-68.8]       146 [136-153]    7779 [437-18892] 25400 [22746-39431]
+  cancel-hit-middle        1143553     47.6    46.4 [42.1-46.4]    56.7 [53.5-57.1]    66.0 [65.6-67.1]       148 [142-164]    5941 [415-18801] 45317 [13589-58934]
+  cancel-hit-back          1145020     47.1    45.7 [41.4-46.4]    56.4 [52.8-56.4]    64.9 [64.2-65.6]    78.1 [73.1-94.9]    5005 [438-18744] 25899 [15972-60600]
+  cancel-miss                99935     24.6    23.2 [22.5-23.2]    28.9 [28.2-28.9]    33.9 [33.5-34.6]    42.1 [41.4-47.1]      216 [119-5020]   14650 [182-18914]
+
+w3-cancel90 / dense (90% cancels at front/middle/back, 2% misses; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 11; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 43/42/42/51/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive               489702     62.7    52.1 [50.7-58.5]    76.7 [73.8-82.8]       109 [107-115]       167 [163-178] 18949 [17009-19395] 35337 [22141-43845]
+  cancel-hit-front         1471573     76.1    62.1 [59.9-66.4]    93.1 [90.6-99.2]       139 [134-146]       205 [195-208] 19086 [18059-19828]96476 [43426-298579]
+  cancel-hit-middle        1469834     66.3    54.2 [52.1-59.2]    85.6 [82.8-90.3]       129 [125-135]       191 [190-200] 19075 [17123-20239]50889 [27256-105097]
+  cancel-hit-back          1468771     61.5    52.1 [50.7-56.0]    73.1 [71.0-78.1]       104 [101-111]       148 [147-156] 18538 [17248-19543]103719 [38403-111440]
+  cancel-miss               100120     46.0    38.5 [36.4-42.5]    52.8 [51.4-55.7]    73.8 [71.7-79.2]       106 [103-120]   17557 [354-19395] 20042 [16912-25663]
+
+w3-cancel90 / dense-hardened (90% cancels at front/middle/back, 2% misses; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 8; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 51/53/42/42/43)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive               489702     68.3    55.7 [51.4-61.7]    81.7 [76.0-86.7]       115 [108-123]       191 [168-219] 19041 [17100-20536] 30731 [24949-76891]
+  cancel-hit-front         1471573     83.5    66.4 [61.7-72.1]     99.9 [93.8-108]       148 [139-159]       214 [199-238] 19406 [18264-20308]74102 [38089-131852]
+  cancel-hit-middle        1469834     73.6    58.9 [53.5-63.1]    91.0 [85.3-98.5]       137 [129-147]       203 [185-221] 19965 [18162-20182]69703 [29447-153657]
+  cancel-hit-back          1468771     69.3    57.1 [52.8-62.4]    79.6 [74.6-86.0]       114 [107-121]       167 [155-192] 19212 [17637-20102]59258 [40788-140297]
+  cancel-miss               100120     48.3    41.4 [34.6-42.1]    54.2 [52.8-57.8]    80.6 [75.3-88.1]       122 [114-134] 19143 [17169-23230] 19632 [18287-23881]
+
+w3-cancel90 / dense-direct (90% cancels at front/middle/back, 2% misses; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 0; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 43/52/42/45/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive               489702     43.8    39.2 [38.9-45.7]    48.5 [47.8-50.7]    58.5 [57.1-61.7]    80.6 [70.6-81.7] 17237 [11569-19246] 25039 [23770-41676]
+  cancel-hit-front         1471573     55.3    48.5 [47.1-55.7]    60.6 [58.9-64.2]    69.6 [68.8-72.4]       147 [135-152] 18961 [16906-19623]41229 [27518-157011]
+  cancel-hit-middle        1469834     48.3    42.1 [41.4-49.2]    54.2 [52.8-58.9]    65.6 [65.6-68.1]      140 [95.6-148] 18927 [17100-19280] 42769 [24217-91849]
+  cancel-hit-back          1468771     48.1    42.5 [41.0-48.5]    54.2 [52.1-58.5]    64.9 [64.2-68.1]    87.8 [78.8-92.0] 18584 [17066-19440]38033 [27162-126315]
+  cancel-miss               100120     25.3    22.5 [22.5-23.9]    28.2 [28.2-31.0]    38.9 [35.7-39.6]    57.1 [47.1-71.7]   16849 [119-18949]   17263 [120-21345]
+
+w4-collide / dense (4096 ids sharing one home slot, index capacity 262144; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 4096; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 52/52/42/52/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive               237751     8226    7985 [7973-7991]    8019 [8002-8025]  27283 [8053-27785] 36895 [14178-45936]134611 [27945-138082]162093 [32789-666133]
+  cancel-hit                237239     8933    8464 [7962-8704]    9503 [9457-9554]  28630 [9663-29360] 38333 [17077-39817]101278 [20308-140913]162433 [24371-1120973]
+  cancel-miss                25010     4864    4777 [4766-4780]    4791 [4791-4797]  23333 [4808-24018]  29041 [9646-31895]110792 [24879-230597]110792 [24879-230597]
+
+w4-collide / dense-hardened (4096 ids sharing one home slot, index capacity 262144; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 3; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 52/52/50/52/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive               237751     74.8    70.3 [67.4-70.6]    78.8 [78.1-79.6]       158 [103-177]       333 [184-360]    5051 [359-20159]  19575 [8812-24215]
+  cancel-hit                237239     77.6    75.3 [71.7-77.4]     95.2 [92.8-102]       150 [116-160]       292 [157-319]     408 [238-21792]  23117 [7730-53085]
+  cancel-miss                25010     69.2    66.0 [62.8-66.4]    76.3 [75.3-76.7]      163 [87.8-177]       322 [174-340]    9388 [407-19098]    9388 [407-19098]
+
+w4-collide / dense-direct (4096 ids sharing one home slot, index capacity 262144; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 0; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 52/52/52/52/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive               237751     47.2    46.4 [41.4-46.4]    52.8 [51.4-52.8]    61.4 [60.6-64.6]    77.4 [70.3-89.2]   19360 [200-21758]   24884 [296-68510]
+  cancel-hit                237239     67.2    62.1 [57.1-63.5]    88.1 [81.7-88.8]       106 [104-108]       158 [120-251]   19360 [519-21073]  27989 [8508-42475]
+  cancel-miss                25010     27.7    28.2 [23.9-28.2]    33.9 [33.2-33.9]    35.3 [35.3-35.7]    46.4 [46.4-55.3]    71.7 [52.1-5476]    71.7 [52.1-5476]
+
+w4-load50 / dense (index at load 1/2: 131071 live of capacity 262144; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 42; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 60/54/52/55/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive              2498829      100    98.8 [97.4-99.9]       128 [126-130]       175 [169-179]       256 [234-297]     5051 [439-5122] 78335 [14646-94201]
+  cancel-hit               2501171      157       148 [143-150]       204 [197-217]       294 [276-328]       446 [413-473]    5282 [2517-8744]74214 [20845-346739]
+
+w4-load50 / dense-hardened (index at load 1/2: 131071 live of capacity 262144; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 58; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 52/57/52/51/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive              2498829      101    99.2 [98.1-99.9]       130 [129-130]       175 [172-177]       249 [242-255]     1554 [443-5080] 48848 [32140-87370]
+  cancel-hit               2501171      157       148 [147-148]       204 [200-213]       294 [283-314]       431 [415-458]    7334 [5174-8881]44989 [24128-703550]
+
+w4-load50 / dense-direct (index at load 1/2: 131071 live of capacity 262144; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 0; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 53/53/53/53/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive              2498829     49.0    48.5 [47.8-48.5]    57.1 [56.4-58.5]    71.3 [71.0-73.8]    87.4 [85.3-92.4]       169 [144-174] 30003 [24332-32844]
+  cancel-hit               2501171      167       142 [130-172]       244 [207-304]       411 [366-469]       525 [483-590]    8202 [5128-9046]558060 [20012-697576]
+
+CPU            : 13th Gen Intel(R) Core(TM) i7-13650HX (GenuineIntel)
+Logical CPUs   : 20 (14 cores, hybrid: 12 logical CPUs on P-cores)
+Pinned to      : CPU 2 (P-core)
+Priority       : HIGH_PRIORITY_CLASS + THREAD_PRIORITY_TIME_CRITICAL
+OS             : Windows 10.0.26200
+Power policy   : Balanced
+Power source   : AC
+Large pages    : not available
+Invariant TSC  : yes
+TSC frequency  : 2.8032 GHz (calibrated over 1 s, spread 1.24501e-05 %)
+Timer overhead : min 39, p50 52, p99 65 TSC ticks (empty tscStart/tscStop pair, not subtracted)
+Clock check    : timer overhead p50 52 at start, 51 at end (-1.92308 %)
+Compiler       : Clang 21.1.8
+Build type     : Release
+Flags          :  -O3 -DNDEBUG
+Git            : 10a5586f8f5c-dirty
+
+CSV written to D:\OrderBook\Eigenbook\bench\results\a4-clang-21.1.8

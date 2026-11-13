@@ -1,0 +1,86 @@
+﻿CPU            : 13th Gen Intel(R) Core(TM) i7-13650HX (GenuineIntel)
+Logical CPUs   : 20 (14 cores, hybrid: 12 logical CPUs on P-cores)
+Pinned to      : CPU 2 (P-core)
+Priority       : HIGH_PRIORITY_CLASS + THREAD_PRIORITY_TIME_CRITICAL
+OS             : Windows 10.0.26200
+Power policy   : Balanced
+Power source   : AC
+Large pages    : not available
+Invariant TSC  : yes
+TSC frequency  : 2.8032 GHz (calibrated over 1 s, spread 1.73373e-05 %)
+Timer overhead : min 39, p50 51, p99 67 TSC ticks (empty tscStart/tscStop pair, not subtracted)
+Compiler       : Clang 21.1.8
+Build type     : Release
+Flags          :  -O3 -DNDEBUG
+Git            : 10a5586f8f5c-dirty
+Hybrid window  : 16384 ticks (--hybrid-window)
+
+w3-cancel70 / dense (70% cancels at front/middle/back, 2% misses; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 10; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 54/51/51/53/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive              1467934     63.6    59.9 [59.2-60.6]    83.8 [83.1-84.2]       119 [116-122]       177 [168-180]     1409 [317-5022] 54803 [25798-75742]
+  cancel-hit-front         1143558     76.2    68.8 [68.1-69.9]       104 [102-105]       152 [149-154]       205 [203-218]    1902 [1526-5020]17778 [12436-115835]
+  cancel-hit-middle        1143553     68.4    62.1 [61.4-62.8]    96.3 [94.2-97.0]       144 [140-147]       200 [193-220]     2453 [348-5014]35885 [11336-158077]
+  cancel-hit-back          1145020     63.7    59.2 [58.5-59.9]    82.4 [81.7-83.5]       118 [117-118]       163 [158-170]     1031 [529-1514] 49876 [11501-96463]
+  cancel-miss                99935     45.9    43.2 [42.8-43.2]    57.1 [56.4-57.4]    82.4 [81.7-85.6]       115 [108-151]      378 [171-1515]    5030 [4780-7740]
+  index probe lengths (all runs, measured part; bucket floors):
+    find           n 9900065, p50 >= 1, p99 >= 4, p99.9 >= 7, max 17
+    insert         n 4900065, p50 >= 1, p99 >= 5, p99.9 >= 7, max 17
+    erase-locate   n 4900065, p50 >= 1, p99 >= 3, p99.9 >= 6, max 17
+    erase-scan     n 4900065, p50 >= 0, p99 >= 4, p99.9 >= 7, max 18
+    erase-shift    n 4900065, p50 >= 0, p99 >= 2, p99.9 >= 4, max 9
+
+w3-cancel90 / dense (90% cancels at front/middle/back, 2% misses; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 11; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 51/51/51/51/43)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive               489702     64.4    59.9 [58.5-61.0]    83.5 [82.4-85.3]       118 [115-120]       177 [169-179]    4669 [1545-5025] 47064 [15735-96182]
+  cancel-hit-front         1471573     76.0    68.8 [68.1-71.0]       103 [102-106]       153 [148-154]       208 [203-211]    2019 [1584-5060] 53604 [7875-107648]
+  cancel-hit-middle        1469834     67.1    61.4 [60.6-62.4]    94.5 [93.5-97.7]       143 [139-144]       198 [191-203]      959 [405-1514] 35404 [10555-55091]
+  cancel-hit-back          1468771     63.6    58.9 [58.1-60.6]    81.7 [81.0-83.8]       116 [115-120]       161 [158-164]      965 [504-5060]  65424 [7569-83919]
+  cancel-miss               100120     45.2    43.2 [42.8-43.5]    57.1 [56.4-58.1]    80.3 [80.3-85.3]       129 [123-132]     312 [241-19657]   6714 [1250-74899]
+  index probe lengths (all runs, measured part; bucket floors):
+    find           n 9899880, p50 >= 1, p99 >= 4, p99.9 >= 7, max 20
+    insert         n 4899880, p50 >= 1, p99 >= 5, p99.9 >= 7, max 20
+    erase-locate   n 4899880, p50 >= 1, p99 >= 4, p99.9 >= 6, max 20
+    erase-scan     n 4899880, p50 >= 0, p99 >= 4, p99.9 >= 7, max 24
+    erase-shift    n 4899880, p50 >= 0, p99 >= 2, p99.9 >= 4, max 10
+
+w4-collide / dense (4096 ids sharing one home slot, index capacity 262144; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 4096; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 52/52/51/51/51)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive               237751     6243    6421 [6421-6421]    6444 [6444-6444]    6604 [6558-7397] 12454 [11581-36963]61780 [44794-101552]96887 [71077-670670]
+  cancel-hit                237239     8156    8048 [7951-8093]    9891 [9863-9914] 10405 [10388-10433] 20947 [14748-42374]69817 [50502-101552]115533 [77674-200270]
+  cancel-miss                25010     3122    3207 [3205-3207]    3219 [3219-3222]    3259 [3250-3310]   7774 [7214-33356] 25578 [8064-133896] 25578 [8064-133896]
+  index probe lengths (all runs, measured part; bucket floors):
+    find           n 974990, p50 >= 4096, p99 >= 4096, p99.9 >= 4096, max 4097
+    insert         n 474990, p50 >= 4096, p99 >= 4096, p99.9 >= 4096, max 4097
+    erase-locate   n 474990, p50 >= 2048, p99 >= 2048, p99.9 >= 2048, max 4097
+    erase-scan     n 474990, p50 >= 2048, p99 >= 2048, p99.9 >= 2048, max 4096
+    erase-shift    n 474990, p50 >= 2048, p99 >= 2048, p99.9 >= 2048, max 4096
+
+w4-load50 / dense (index at load 1/2: 131071 live of capacity 262144; 5 runs; churn 0.0 levels/op; outcome mismatches 0; max index cluster 42; id rejects 0; pmr upstream allocations per run 0/0/0/0/0; clock probe (empty-timer p50, ticks) per run 51/51/51/52/52)
+  class (ns)                 count     mean                 p50                 p90                 p99               p99.9              p99.99                 max
+  add-passive              2498829      101     97.7 [94.9-101]       130 [129-131]       174 [169-177]       257 [237-263]     3390 [566-5097]83546 [46206-2052116]
+  cancel-hit               2501171      157       145 [143-148]       205 [200-208]       305 [286-308]       454 [437-463]   8704 [8030-10690]94898 [25604-586475]
+  index probe lengths (all runs, measured part; bucket floors):
+    find           n 10000000, p50 >= 1, p99 >= 11, p99.9 >= 20, max 57
+    insert         n 5000000, p50 >= 2, p99 >= 13, p99.9 >= 22, max 57
+    erase-locate   n 5000000, p50 >= 1, p99 >= 7, p99.9 >= 13, max 41
+    erase-scan     n 5000000, p50 >= 1, p99 >= 14, p99.9 >= 23, max 58
+    erase-shift    n 5000000, p50 >= 0, p99 >= 5, p99.9 >= 8, max 18
+
+CPU            : 13th Gen Intel(R) Core(TM) i7-13650HX (GenuineIntel)
+Logical CPUs   : 20 (14 cores, hybrid: 12 logical CPUs on P-cores)
+Pinned to      : CPU 2 (P-core)
+Priority       : HIGH_PRIORITY_CLASS + THREAD_PRIORITY_TIME_CRITICAL
+OS             : Windows 10.0.26200
+Power policy   : Balanced
+Power source   : AC
+Large pages    : not available
+Invariant TSC  : yes
+TSC frequency  : 2.8032 GHz (calibrated over 1 s, spread 1.73373e-05 %)
+Timer overhead : min 39, p50 51, p99 67 TSC ticks (empty tscStart/tscStop pair, not subtracted)
+Clock check    : timer overhead p50 51 at start, 52 at end (1.96078 %)
+Compiler       : Clang 21.1.8
+Build type     : Release
+Flags          :  -O3 -DNDEBUG
+Git            : 10a5586f8f5c-dirty
+
+CSV written to D:\OrderBook\Eigenbook\bench\results\a4-clang-21.1.8-instrumented
