@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <type_traits>
 
 #include <eigenbook/core/types.hpp>
@@ -22,13 +23,16 @@ public:
           const Price iPrice,
           const Quantity iQuantity,
           const Timestamp iTimestamp,
-          const ParticipantId iParticipant = ParticipantId{0}) noexcept
+          const ParticipantId iParticipant = ParticipantId{0},
+          const TimeInForce iTimeInForce = TimeInForce::DAY,
+          const bool iPostOnly = false) noexcept
         : id(iId)
         , price(iPrice)
         , quantity(iQuantity)
         , timestamp(iTimestamp)
         , side(iSide)
         , type(iType)
+        , flags(packFlags(iTimeInForce, iPostOnly))
         , participant(iParticipant) {}
 
     Order(const Order&) = delete;
@@ -53,6 +57,14 @@ public:
 
     [[nodiscard]] ParticipantId getParticipant() const noexcept { return participant; }
 
+    // DAY or GTC for a resting order (IOC / FOK never rest).
+    [[nodiscard]] TimeInForce getTimeInForce() const noexcept {
+        return static_cast<TimeInForce>(flags & kTimeInForceMask);
+    }
+
+    // A re-entry (modify) of a post-only order must not take liquidity either.
+    [[nodiscard]] bool isPostOnly() const noexcept { return (flags & kPostOnlyBit) != 0; }
+
     [[nodiscard]] bool isFilled() const noexcept { return quantity.isZero(); }
 
     // Next order in time priority at the same price, or nullptr.
@@ -62,6 +74,15 @@ private:
     // Quantity and links change only through PriceLevel, which keeps the level aggregate in sync.
     friend class PriceLevel;
     friend struct OrderLayout;
+
+    static constexpr std::uint16_t kTimeInForceMask = 0x3;
+    static constexpr std::uint16_t kPostOnlyBit = 0x4;
+
+    [[nodiscard]] static constexpr std::uint16_t packFlags(const TimeInForce tif,
+                                                           const bool postOnly) noexcept {
+        return static_cast<std::uint16_t>((static_cast<unsigned>(tif) & kTimeInForceMask) |
+                                          (postOnly ? kPostOnlyBit : 0U));
+    }
 
     Order* prev{nullptr};
     Order* next{nullptr};
@@ -73,7 +94,7 @@ private:
     Timestamp timestamp;
     OrderSide side;
     OrderType type;
-    // Offsets 58-59 are free (time-in-force flags, Phase B1.3).
+    std::uint16_t flags; // time in force (bits 0-1), post-only (bit 2)
     ParticipantId participant;
 };
 
@@ -93,6 +114,7 @@ struct OrderLayout {
     static_assert(offsetof(Order, timestamp) == 48);
     static_assert(offsetof(Order, side) == 56);
     static_assert(offsetof(Order, type) == 57);
+    static_assert(offsetof(Order, flags) == 58);
     static_assert(offsetof(Order, participant) == 60);
 };
 

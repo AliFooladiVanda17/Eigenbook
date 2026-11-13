@@ -127,14 +127,27 @@ public:
     // Visits non-empty levels from best to worst: cb(const PriceLevel&).
     template <typename Callback>
     void forEachLevel(Callback&& cb) const {
+        forEachLevelWhile([&](const PriceLevel& level) {
+            cb(level);
+            return true;
+        });
+    }
+
+    // Like forEachLevel, but stops as soon as cb(const PriceLevel&) returns false. Read-only.
+    template <typename Callback>
+    void forEachLevelWhile(Callback&& cb) const {
         if constexpr (Side == OrderSide::BUY) {
             for (std::size_t i = best; i != LevelBitmap::npos;
                  i = i == 0 ? LevelBitmap::npos : occupied.findPrev(i - 1)) {
-                cb(static_cast<const PriceLevel&>(levels[i]));
+                if (!cb(static_cast<const PriceLevel&>(levels[i]))) {
+                    return;
+                }
             }
         } else {
             for (std::size_t i = best; i != LevelBitmap::npos; i = occupied.findNext(i + 1)) {
-                cb(static_cast<const PriceLevel&>(levels[i]));
+                if (!cb(static_cast<const PriceLevel&>(levels[i]))) {
+                    return;
+                }
             }
         }
     }

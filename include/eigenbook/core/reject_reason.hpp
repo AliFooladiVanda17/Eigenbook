@@ -18,6 +18,8 @@ enum class RejectReason : std::uint8_t {
     PRICE_OUT_OF_BAND,    // limit price outside the instrument band [minPrice, maxPrice]
     NOTIONAL_LIMIT,       // |price| x quantity above BookLimits::maxNotional
     NOT_OWNER,            // cancel / modify by a participant that does not own the order
+    POST_ONLY_WOULD_TRADE, // a post-only order (or its re-entry) would take liquidity
+    INVALID_QUALIFIERS,    // time in force, post-only and minimum quantity do not fit together
 };
 
 } // namespace eigenbook

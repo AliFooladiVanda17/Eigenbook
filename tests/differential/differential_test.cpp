@@ -19,6 +19,14 @@ namespace eigenbook {
 
 namespace {
 
+// Order qualifiers for the reference book, applied the naive way: post-only checks the best
+// opposite price, FOK and the minimum quantity sum every opposite order that crosses.
+struct RefQualifiers {
+    TimeInForce tif{TimeInForce::DAY};
+    bool postOnly{false};
+    std::uint64_t minQty{0};
+};
+
 // Deliberately simple: one vector per side, scanned linearly.
 class ReferenceBook {
 public:
@@ -28,10 +36,43 @@ public:
         std::int64_t price;
         std::uint64_t qty;
         std::uint64_t seq;
+        bool postOnly{false};
     };
 
-    std::vector<Fill>
-    add(std::uint64_t id, OrderSide side, OrderType type, std::int64_t price, std::uint64_t qty) {
+    // Set by add / modify: the request was rejected (post-only would trade); nothing changed.
+    bool rejected{false};
+
+    std::vector<Fill> add(std::uint64_t id,
+                          OrderSide side,
+                          OrderType type,
+                          std::int64_t price,
+                          std::uint64_t qty,
+                          const RefQualifiers q = {}) {
+        rejected = false;
+        const auto crosses = [&](const Resting& r) {
+            return r.side != side &&
+                   (type == OrderType::MARKET ||
+                    (side == OrderSide::BUY ? r.price <= price : r.price >= price));
+        };
+        if (q.postOnly) {
+            const auto best = bestOpposite(side);
+            if (best != orders.end() && crosses(*best)) {
+                rejected = true;
+                return {};
+            }
+        }
+        const std::uint64_t needed = q.tif == TimeInForce::FOK ? qty : q.minQty;
+        if (needed > 0) {
+            std::uint64_t available = 0;
+            for (const Resting& r : orders) {
+                available += crosses(r) ? r.qty : 0;
+            }
+            if (available < needed) {
+                return {};
+            }
+        }
+        const bool mayRest = type == OrderType::LIMIT &&
+                             (q.tif == TimeInForce::DAY || q.tif == TimeInForce::GTC);
         std::vector<Fill> fills;
         while (qty > 0) {
             auto best = bestOpposite(side);
@@ -51,8 +92,8 @@ public:
                 orders.erase(best);
             }
         }
-        if (qty > 0 && type == OrderType::LIMIT) {
-            orders.push_back({id, side, price, qty, seq++});
+        if (qty > 0 && mayRest) {
+            orders.push_back({id, side, price, qty, seq++, q.postOnly});
         }
         return fills;
     }
@@ -68,13 +109,23 @@ public:
 
     std::vector<Fill> modify(std::uint64_t id, std::int64_t price, std::uint64_t qty) {
         const auto it = find(id);
+        rejected = false;
         if (it->price == price && qty <= it->qty) {
             it->qty = qty;
             return {};
         }
         const OrderSide side = it->side;
+        const bool postOnly = it->postOnly;
+        if (postOnly) {
+            const auto best = bestOpposite(side);
+            if (best != orders.end() &&
+                (side == OrderSide::BUY ? best->price <= price : best->price >= price)) {
+                rejected = true;
+                return {};
+            }
+        }
         orders.erase(it);
-        return add(id, side, OrderType::LIMIT, price, qty);
+        return add(id, side, OrderType::LIMIT, price, qty, {.postOnly = postOnly});
     }
 
     std::vector<Resting>::iterator find(std::uint64_t id) {
@@ -189,7 +240,8 @@ void runDifferential(Books& books,
                      const int steps,
                      PriceFn&& price,
                      StepFn&& onStep,
-                     const int depthEvery = 64) {
+                     const int depthEvery = 64,
+                     const bool qualifiers = false) {
     ReferenceBook reference;
     std::mt19937_64 rng(seed);
     std::uint64_t nextId = 1;
@@ -206,10 +258,27 @@ void runDifferential(Books& books,
             const OrderType type = rng() % 12 == 0 ? OrderType::MARKET : OrderType::LIMIT;
             const std::int64_t p = price(rng);
             const std::uint64_t qty = 1 + rng() % 50;
-            const OrderRequest request{{id}, side, type, {p}, {qty}, {id}};
-            refFills = reference.add(id, side, type, p, qty);
+            OrderRequest request{{id}, side, type, {p}, {qty}, {id}};
+            RefQualifiers q;
+            if (qualifiers) {
+                // Always a valid combination: rejects other than post-only are tested elsewhere.
+                q.tif = static_cast<TimeInForce>(rng() % 4);
+                const bool rests = type == OrderType::LIMIT &&
+                                   (q.tif == TimeInForce::DAY || q.tif == TimeInForce::GTC);
+                q.postOnly = rests && rng() % 4 == 0;
+                q.minQty = !q.postOnly && rng() % 5 == 0 ? 1 + rng() % qty : 0;
+                request.timeInForce = q.tif;
+                request.postOnly = q.postOnly;
+                request.minQuantity = {q.minQty};
+            }
+            refFills = reference.add(id, side, type, p, qty, q);
             books.each([&](const char* name, auto& book) {
                 const auto r = book.addOrder(request, logs[k++]);
+                if (reference.rejected) {
+                    ASSERT_FALSE(r) << name << " step " << step;
+                    ASSERT_EQ(r.error(), RejectReason::POST_ONLY_WOULD_TRADE) << name;
+                    return;
+                }
                 ASSERT_TRUE(r) << name << " step " << step;
                 ASSERT_EQ((r->filled + r->resting + r->cancelled), Quantity{qty}) << name;
             });
@@ -226,7 +295,13 @@ void runDifferential(Books& books,
                 const ModifyRequest request{{victim.id}, {p}, {qty}, {nextId}};
                 refFills = reference.modify(victim.id, p, qty);
                 books.each([&](const char* name, auto& book) {
-                    ASSERT_TRUE(book.modifyOrder(request, logs[k++])) << name << " step " << step;
+                    const auto r = book.modifyOrder(request, logs[k++]);
+                    if (reference.rejected) {
+                        ASSERT_FALSE(r) << name << " step " << step;
+                        ASSERT_EQ(r.error(), RejectReason::POST_ONLY_WOULD_TRADE) << name;
+                        return;
+                    }
+                    ASSERT_TRUE(r) << name << " step " << step;
                 });
             }
         }
@@ -311,6 +386,24 @@ TEST(OrderBookDifferential, AllLaddersAgreeUnderADriftingMid) {
         ASSERT_FALSE(::testing::Test::HasFatalFailure()) << "seed " << seed;
         EXPECT_GT(books.hybrid.bids().levelsMoved() + books.hybrid.asks().levelsMoved(), 0u)
             << "seed " << seed;
+    }
+}
+
+// Random time in force (DAY / GTC / IOC / FOK), post-only and minimum quantities in a narrow band,
+// where most orders cross: FOK and minimum-quantity failures, post-only rejects (also on modify)
+// and IOC remainders must match the naive reference exactly.
+TEST(OrderBookDifferential, QualifiersAgreeWithTheReference) {
+    for (std::uint64_t seed = 11; seed <= 13; ++seed) {
+        Books books({900}, 200, {960});
+        runDifferential(
+            books,
+            seed,
+            20'000,
+            [](std::mt19937_64& rng) { return 980 + static_cast<std::int64_t>(rng() % 41); },
+            [](std::mt19937_64&) {},
+            64,
+            true);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure()) << "seed " << seed;
     }
 }
 

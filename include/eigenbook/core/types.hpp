@@ -108,6 +108,18 @@ enum class OrderType : std::uint8_t {
     MARKET
 };
 
+// How long an order may stay in the book.
+//   DAY  rests until the end of the trading day (expiry arrives with sessions, Phase B8).
+//   GTC  rests until cancelled.
+//   IOC  trades what it can on arrival; the rest is cancelled, never rests.
+//   FOK  trades its whole quantity on arrival or nothing at all; never rests.
+enum class TimeInForce : std::uint8_t {
+    DAY,
+    GTC,
+    IOC,
+    FOK
+};
+
 [[nodiscard]] constexpr OrderSide opposite(const OrderSide side) noexcept {
     return side == OrderSide::BUY ? OrderSide::SELL : OrderSide::BUY;
 }

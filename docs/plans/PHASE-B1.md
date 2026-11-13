@@ -46,6 +46,22 @@ cancelled; post-only that would trade is rejected (`POST_ONLY_WOULD_TRADE`); inv
 rejected (`INVALID_QUALIFIERS`). DAY / GTC expiry belongs to the session layer (B4); the book stores
 the TIF.
 
+As built, decisions worth recording:
+
+- A FOK or minimum-quantity order whose condition fails is *accepted* with `cancelled = quantity`,
+  not rejected: it was a valid order that expired on arrival, like an IOC that found nothing. Its
+  id is abandoned (an issued handle goes back to the table). Post-only is the opposite case: the
+  participant asked for "never take", so taking would break the request, and it is a reject.
+- MARKET with DAY / GTC keeps its old meaning (remainder cancelled) instead of becoming invalid, so
+  existing callers keep working.
+- IOC / FOK limit orders get the price checks (band, range, notional) but not the room checks
+  (level quantity, level capacity, `maxOrders`): they never rest.
+- The check order is quantity, quantity limit, qualifiers, id admission, price, room, post-only;
+  the liquidity look for FOK / minimum quantity runs last, just before matching.
+- The pre-check counts whole level aggregates. That is exact today; once self-trade prevention
+  (B7) can skip or cancel resting orders, it must subtract them, or a FOK could pass the check
+  and then fill only partly.
+
 ## B1.4 Invariant checker
 
 `checkInvariants()` on the book and every ladder: not crossed; every level non-empty; level

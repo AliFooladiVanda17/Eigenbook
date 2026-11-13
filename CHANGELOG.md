@@ -10,6 +10,12 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- Time in force and qualifiers: `TimeInForce` {DAY, GTC, IOC, FOK}; `OrderRequest::timeInForce`,
+  `postOnly`, `minQuantity`; `Order::getTimeInForce()`, `isPostOnly()` (flags at offset 58).
+  FOK and minimum quantity decide from a read-only look at the opposite side and never mutate
+  when they fail; post-only that would trade, on add or modify, is rejected with
+  `POST_ONLY_WOULD_TRADE`; bad combinations with `INVALID_QUALIFIERS`. Every ladder has
+  `forEachLevelWhile`. Differential test with random qualifiers. Requirements FR-33, FR-37–FR-39.
 - Participants and trade ids: `ParticipantId`, `TradeId`; `Order::getParticipant()` (offset 60,
   every `Order` field offset static-asserted); `OrderRequest::participant`,
   `ModifyRequest::participant`; participant cancel `cancelOrder(id, participant)` and owner-only

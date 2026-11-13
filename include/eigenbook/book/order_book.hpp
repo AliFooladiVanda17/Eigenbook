@@ -34,6 +34,14 @@ struct OrderRequest {
     // priority sequence (Order::getTimestamp()); input time comes from the sequencer (Phase B3).
     Timestamp timestamp{0};
     ParticipantId participant{0}; // owner of the order; checked by cancel and modify
+
+    // Qualifiers. A MARKET order never rests, whatever its time in force (DAY / GTC act as IOC).
+    TimeInForce timeInForce{TimeInForce::DAY};
+    // Rejected with POST_ONLY_WOULD_TRADE instead of trading; LIMIT with DAY / GTC only.
+    bool postOnly{false};
+    // At least this much must trade on arrival, or the whole order is cancelled without touching
+    // the book. 0: no minimum. FOK is the case minQuantity == quantity, plus IOC.
+    Quantity minQuantity{0};
 };
 
 // New price and/or quantity for a resting order. Reducing the quantity at the same price keeps
@@ -192,14 +200,48 @@ private:
     [[nodiscard]] std::optional<RejectReason>
     validateNew(const OrderRequest& request) const noexcept;
 
-    // Checks that `quantity` could rest at `price` on `side`: band, ladder range, notional, level
-    // quantity, ladder capacity, order capacity. `replacing` is an order that is removed first
-    // (modify re-entry); the level quantity, level and storage it frees are counted.
+    // Time in force, post-only and minimum quantity fit together (INVALID_QUALIFIERS otherwise).
+    [[nodiscard]] static bool validQualifiers(const OrderRequest& request) noexcept;
+
+    // The remainder of this request would rest (LIMIT, DAY or GTC).
+    [[nodiscard]] static bool mayRest(const OrderRequest& request) noexcept {
+        return request.type == OrderType::LIMIT &&
+               (request.timeInForce == TimeInForce::DAY || request.timeInForce == TimeInForce::GTC);
+    }
+
+    // Checks on a limit price, whether or not the order can rest: band, ladder range, notional.
+    [[nodiscard]] std::optional<RejectReason>
+    validatePrice(OrderSide side, Price price, Quantity quantity) const noexcept;
+
+    // Checks that `quantity` has room to rest at `price` on `side`: level quantity, ladder
+    // capacity, order capacity. `replacing` is an order that is removed first (modify re-entry);
+    // the level quantity, level and storage it frees are counted.
+    [[nodiscard]] std::optional<RejectReason> validateRoom(OrderSide side,
+                                                           Price price,
+                                                           Quantity quantity,
+                                                           const Order* replacing) const noexcept;
+
+    // validatePrice and validateRoom.
     [[nodiscard]] std::optional<RejectReason>
     validateResting(OrderSide side,
                     Price price,
                     Quantity quantity,
                     const Order* replacing) const noexcept;
+
+    // An order on `side` at limit `price` would trade with the best opposite level.
+    [[nodiscard]] bool wouldTake(const OrderSide side, const Price price) const noexcept {
+        if (side == OrderSide::BUY) {
+            const std::optional<Price> ask = askLadder.bestPrice();
+            return ask && *ask <= price;
+        }
+        const std::optional<Price> bid = bidLadder.bestPrice();
+        return bid && *bid >= price;
+    }
+
+    // Read-only: the opposite side holds at least `needed` that a taker of `type` at `limit`
+    // could trade with. Walks levels best to worst and stops as soon as the answer is known.
+    template <OrderSide TakerSide>
+    [[nodiscard]] bool canTake(OrderType type, Price limit, Quantity needed) const noexcept;
 
     // Matches and rests a request that has passed validation. Cannot reject; with map ladder M0 a
     // new tree node can still throw std::bad_alloc.
@@ -316,15 +358,75 @@ auto BasicOrderBook<Ladder, Locator>::validateNew(const OrderRequest& request) c
     if (request.quantity > limits.maxOrderQuantity) [[unlikely]] {
         return RejectReason::ORDER_QUANTITY_LIMIT;
     }
+    if (!validQualifiers(request)) [[unlikely]] {
+        return RejectReason::INVALID_QUALIFIERS;
+    }
     // The id must be storable if the order ends up resting.
     if (const Admission admission = index.admit(request.id); admission != Admission::OK)
         [[unlikely]] {
         return rejectFor(admission);
     }
     if (request.type == OrderType::LIMIT) {
-        return validateResting(request.side, request.price, request.quantity, nullptr);
+        if (const std::optional<RejectReason> reject =
+                validatePrice(request.side, request.price, request.quantity)) [[unlikely]] {
+            return reject;
+        }
+        // IOC / FOK never rest, so they need no room.
+        if (mayRest(request)) {
+            if (const std::optional<RejectReason> reject =
+                    validateRoom(request.side, request.price, request.quantity, nullptr))
+                [[unlikely]] {
+                return reject;
+            }
+        }
+        if (request.postOnly && wouldTake(request.side, request.price)) [[unlikely]] {
+            return RejectReason::POST_ONLY_WOULD_TRADE;
+        }
     }
     return std::nullopt;
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+bool BasicOrderBook<Ladder, Locator>::validQualifiers(const OrderRequest& request) noexcept {
+    const TimeInForce tif = request.timeInForce;
+    if (tif != TimeInForce::DAY && tif != TimeInForce::GTC && tif != TimeInForce::IOC &&
+        tif != TimeInForce::FOK) {
+        return false;
+    }
+    if (request.minQuantity > request.quantity) {
+        return false;
+    }
+    // Post-only is a resting-only promise: it cannot be combined with anything that must trade.
+    return !request.postOnly || (mayRest(request) && request.minQuantity.isZero());
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+template <OrderSide TakerSide>
+bool BasicOrderBook<Ladder, Locator>::canTake(const OrderType type,
+                                              const Price limit,
+                                              const Quantity needed) const noexcept {
+    const auto& makers = [this]() -> const auto& {
+        if constexpr (TakerSide == OrderSide::BUY) {
+            return askLadder;
+        } else {
+            return bidLadder;
+        }
+    }();
+    // Cannot wrap: the walk stops once the sum reaches `needed` (<= maxOrderQuantity <= 2^62),
+    // and one level adds at most maxLevelQuantity (<= 2^63).
+    Quantity available{0};
+    makers.forEachLevelWhile([&](const PriceLevel& level) {
+        if (type == OrderType::LIMIT && !crosses<TakerSide>(limit, level.price())) {
+            return false;
+        }
+        available += level.quantity();
+        return available < needed;
+    });
+    return available >= needed;
 }
 
 template <template <OrderSide> class Ladder, typename Locator>
@@ -335,6 +437,19 @@ auto BasicOrderBook<Ladder, Locator>::validateResting(const OrderSide side,
                                                       const Quantity quantity,
                                                       const Order* replacing) const noexcept
     -> std::optional<RejectReason> {
+    if (const std::optional<RejectReason> reject = validatePrice(side, price, quantity)) {
+        return reject;
+    }
+    return validateRoom(side, price, quantity, replacing);
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+auto BasicOrderBook<Ladder, Locator>::validatePrice(const OrderSide side,
+                                                    const Price price,
+                                                    const Quantity quantity) const noexcept
+    -> std::optional<RejectReason> {
     if (price < limits.minPrice || price > limits.maxPrice) [[unlikely]] {
         return RejectReason::PRICE_OUT_OF_BAND;
     }
@@ -344,6 +459,17 @@ auto BasicOrderBook<Ladder, Locator>::validateResting(const OrderSide side,
     if (!notionalWithin(price, quantity, limits.maxNotional)) [[unlikely]] {
         return RejectReason::NOTIONAL_LIMIT;
     }
+    return std::nullopt;
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+auto BasicOrderBook<Ladder, Locator>::validateRoom(const OrderSide side,
+                                                   const Price price,
+                                                   const Quantity quantity,
+                                                   const Order* replacing) const noexcept
+    -> std::optional<RejectReason> {
     // Conservative (all checks below): they assume the whole quantity rests, so an order that
     // would trade in full can be rejected by them too.
     const PriceLevel* level = levelAt(side, price);
@@ -388,6 +514,20 @@ template <template <OrderSide> class Ladder, typename Locator>
 template <typename OnFill>
 auto BasicOrderBook<Ladder, Locator>::execute(const OrderRequest& request, OnFill& onFill)
     -> Result {
+    // FOK and minimum quantity: decided by a read-only look at the opposite side, so a failed
+    // condition cancels the whole order without a single fill.
+    const Quantity needed = request.timeInForce == TimeInForce::FOK ? request.quantity
+                                                                    : request.minQuantity;
+    if (!needed.isZero()) {
+        const bool enough = request.side == OrderSide::BUY
+                                ? canTake<OrderSide::BUY>(request.type, request.price, needed)
+                                : canTake<OrderSide::SELL>(request.type, request.price, needed);
+        if (!enough) {
+            index.abandon(request.id);
+            return ExecutionResult{.cancelled = request.quantity};
+        }
+    }
+
     const Quantity remaining = request.side == OrderSide::BUY
                                    ? sweep<OrderSide::BUY>(request.id,
                                                            request.type,
@@ -405,7 +545,7 @@ auto BasicOrderBook<Ladder, Locator>::execute(const OrderRequest& request, OnFil
         index.abandon(request.id);
         return result;
     }
-    if (request.type == OrderType::MARKET) {
+    if (!mayRest(request)) {
         index.abandon(request.id);
         result.cancelled = remaining;
         return result;
@@ -480,13 +620,19 @@ auto BasicOrderBook<Ladder, Locator>::modifyOrder(const ModifyRequest& request, 
         [[unlikely]] {
         return std::unexpected(*reject);
     }
+    // The order's own side does not count: only the opposite best can be taken.
+    if (order->isPostOnly() && wouldTake(order->getSide(), request.price)) [[unlikely]] {
+        return std::unexpected(RejectReason::POST_ONLY_WOULD_TRADE);
+    }
     const OrderRequest reentry{.id = request.id,
                                .side = order->getSide(),
                                .type = OrderType::LIMIT,
                                .price = request.price,
                                .quantity = request.quantity,
                                .timestamp = request.timestamp,
-                               .participant = order->getParticipant()};
+                               .participant = order->getParticipant(),
+                               .timeInForce = order->getTimeInForce(),
+                               .postOnly = order->isPostOnly()};
     detachForReentry(*order); // the locator keeps the id valid (unbind), so no admission is needed
     return execute(reentry, onFill);
 }
@@ -562,7 +708,9 @@ void BasicOrderBook<Ladder, Locator>::rest(const OrderRequest& request, const Qu
                                request.price,
                                quantity,
                                Timestamp{++prioritySequence},
-                               request.participant);
+                               request.participant,
+                               request.timeInForce,
+                               request.postOnly);
     // Index growth or a new tree level can allocate; never leave a half-linked node behind.
     try {
         index.insert(request.id, order);

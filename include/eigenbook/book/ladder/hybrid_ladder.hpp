@@ -160,16 +160,31 @@ public:
     // Visits non-empty levels from best to worst: cb(const PriceLevel&).
     template <typename Callback>
     void forEachLevel(Callback&& cb) const {
-        for (const auto& [price, level] : betterMap()) {
+        forEachLevelWhile([&](const PriceLevel& level) {
             cb(level);
+            return true;
+        });
+    }
+
+    // Like forEachLevel, but stops as soon as cb(const PriceLevel&) returns false. Read-only.
+    template <typename Callback>
+    void forEachLevelWhile(Callback&& cb) const {
+        for (const auto& [price, level] : betterMap()) {
+            if (!cb(level)) {
+                return;
+            }
         }
         if (windowActive != 0) {
             for (std::optional<Price> p = windowBest; p; p = nextWorseInWindow(*p)) {
-                cb(static_cast<const PriceLevel&>(window[slotOf(*p)]));
+                if (!cb(static_cast<const PriceLevel&>(window[slotOf(*p)]))) {
+                    return;
+                }
             }
         }
         for (const auto& [price, level] : worseMap()) {
-            cb(level);
+            if (!cb(level)) {
+                return;
+            }
         }
     }
 

@@ -83,7 +83,7 @@ that into `CAPACITY_EXCEEDED` **before** any matching (add) or any change (modif
 | 48 | `timestamp` (book priority sequence) | 8 |
 | 56 | `side` | 1 |
 | 57 | `type` | 1 |
-| 58–59 | free (time-in-force flags, B1.3) | 2 |
+| 58 | `flags`: time in force (bits 0–1), post-only (bit 2) | 2 |
 | 60 | `participant` | 4 |
 
 The links used while walking a queue and the fields read while matching share one cache line.

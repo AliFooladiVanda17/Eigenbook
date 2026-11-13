@@ -250,8 +250,19 @@ public:
     // Visits non-empty levels from best to worst: cb(const PriceLevel&).
     template <typename Callback>
     void forEachLevel(Callback&& cb) const {
-        for (const auto& [price, level] : levels) {
+        forEachLevelWhile([&](const PriceLevel& level) {
             cb(level);
+            return true;
+        });
+    }
+
+    // Like forEachLevel, but stops as soon as cb(const PriceLevel&) returns false. Read-only.
+    template <typename Callback>
+    void forEachLevelWhile(Callback&& cb) const {
+        for (const auto& [price, level] : levels) {
+            if (!cb(level)) {
+                return;
+            }
         }
     }
 
