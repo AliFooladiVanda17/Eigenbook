@@ -362,7 +362,8 @@ Detailed plans live in [docs/plans/](docs/plans/).
 - [x] Latency harness: TSC timer, log-linear histograms, CPU pinning, seeded workloads,
       zero-allocation test
 - [x] Map-ladder tail: preallocated node resources (M1, M2), hybrid ladder, measured (A3)
-- [ ] Cancel-path tail: direct order table with generation-checked handles, hardened hash index
+- [x] Cancel-path tail: direct order table with generation-checked handles, hardened hash index,
+      measured (A4); summary in [docs/RESULTS_SUMMARY.md](docs/RESULTS_SUMMARY.md)
 
 **Phase B: around the book** (one phase at a time)
 - [ ] Hard capacity limits, all-or-nothing modify, checked arithmetic, ownership, IOC/FOK/post-only

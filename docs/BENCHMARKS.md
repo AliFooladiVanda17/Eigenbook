@@ -860,3 +860,188 @@ Latencies in ns; median over 5 runs, min–max in small print.
 | add-aggr-5+ | 734 | 210 <sub>208–213</sub> | 266 <sub>252–270</sub> | 320 <sub>280–388</sub> | 347 <sub>320–568</sub> | 347 <sub>320–568</sub> | 347 <sub>320–568</sub> |
 | cancel-hit | 2186595 | 66.7 <sub>66.7–66.7</sub> | 84.5 <sub>84.5–84.9</sub> | 106 <sub>106–106</sub> | 142 <sub>128–152</sub> | 4403 <sub>441–5128</sub> | 25377 <sub>13475–58435</sub> |
 | response | 5000000 | 142 <sub>141–142</sub> | 190 <sub>188–192</sub> | 2744 <sub>395–4631</sub> | 56073 <sub>29543–200548</sub> | 309954 <sub>90685–1242740</sub> | 433418 <sub>285072–1586170</sub> |
+
+## Phase A4: cancel-path tail
+
+**Question.** How long is the cancel path's tail with the current order index, how much of it is
+the index's probing, and what do a hardened hash index and engine-issued handles change?
+
+**Books** (all on the dense ladder, so the ladder is the same and cheap): `dense` (current
+`OrderIndex`), `dense-hardened` (`HardenedOrderIndex`, random seed, `maxProbe` 128),
+`dense-direct` (`DirectOrderTable`). For `dense-direct` the harness translates workload ids to
+handles **outside** the timed region; an add's timed region covers `reserveOrderId()` +
+`addOrder`.
+
+### Environment
+
+As A3 (i7-13650HX, CPU 2 = P-core, Windows 11, Clang 21.1.8 `-O3`, AC, Balanced plan). Source:
+git `303e223` plus the dense id-translation change in `bench/harness/executor.hpp` (`-dirty`).
+**Plain session: every run at clock probe 42–44 ticks** (one clock state throughout, the
+steadiest session so far). Instrumented session: probe 51–54 except W3-cancel90 run 5 (43).
+Every run: 0 outcome mismatches, 0 ids refused by the hardened index. Files:
+`bench/results/a4-clang-21.1.8/` (plain), `bench/results/a4-clang-21.1.8-instrumented/` (probe
+distributions, `index_probes_*.csv`), `bench/results/a4-clang-21.1.8-sorted-lookup/` (first plain
+session, see finding 6).
+
+### Probe lengths of the current index (instrumented build, all runs merged)
+
+Bucket floors: lengths below 64 are exact, above that powers of two. "erase-scan" counts the slots
+the backward shift inspects after the hole, "erase-shift" the entries it moves.
+
+| Workload | find p99 / p99.9 / max | insert p99 / max | erase-scan p99 / p99.9 / max | erase-shift p99 / max |
+|---|---|---|---|---|
+| W3-cancel70 (≈2,000 live) | 4 / 7 / 17 | 5 / 17 | 4 / 7 / 18 | 2 / 9 |
+| W3-cancel90 | 4 / 7 / 20 | 5 / 20 | 4 / 7 / 24 | 2 / 10 |
+| W4-load50 (131,071 live, load 1/2) | 11 / 20 / 57 | 13 / 57 | 14 / 23 / 58 | 5 / 18 |
+| W4-collide (4,096 crafted ids) | ≥ 4,096 / ≥ 4,096 / 4,097 | ≥ 4,096 / 4,097 | ≥ 2,048 / ≥ 2,048 / 4,096 | ≥ 2,048 / 4,096 |
+
+### What the data shows (plain session)
+
+1. **The attack works on the current index and not on either replacement.** W4-collide cancel
+   p50 / p99 / p99.9: current 7,072 / 7,854 / 11,701 ns; hardened 60 / 96 / 150 ns; direct
+   51 / 84 / 91 ns. Every crafted id walks a 4,096-slot cluster in the current index (table
+   above); with the hardened index's secret seed the same ids spread out (longest cluster 3), and
+   the direct table never looks at the id's bits.
+2. **Without an attacker, the hardened index costs nothing measurable.** W3 and W4-load50 cancels
+   are within 5 % of the current index at every percentile up to p99.9 (for example W4-load50
+   cancel p99 236 vs 239 ns).
+3. **Engine-issued handles flatten the cancel distribution when the book is cache-resident.**
+   W3-cancel70, front-of-queue cancel p50 / p99 / p99.9: current 55 / 121 / 164 ns, direct
+   43 / 53 / 59 ns; back of queue 48 / 93 / 123 vs 37 / 49 / 54 ns. A cancel of an unknown id
+   takes 19 ns at p50 and 30 ns at p99.9 (current: 35 / 86 ns). The hash index's variable probe
+   length (p99 4, max 17 here) and its branches are what the direct table removes.
+4. **With a large book the order itself is the cost, not the locator.** W4-load50 (131,071
+   resting orders): cancel p50 119 (current) vs 93 ns (direct), but p99 236 vs 247 ns and p99.9
+   386 vs 403 ns: within about 5 %, direct slightly behind at the tail. The resting order and its
+   level are cache misses for every locator; the instrumented build shows the index probing only
+   11 slots at p99 there.
+5. **Adds get cheaper with handles too**: passive add p50 37–38 ns (direct) vs 50–80 ns (hash
+   indexes, outside the attack) in W3, W4-load50 and W4-collide, because `admit` is a slot check instead of a probe
+   walk and `insert` is one store.
+6. **A measurement artifact, found and fixed.** In the first plain session the harness translated
+   ids with a binary search over the sorted workload ids (about 20 cache lines touched per op,
+   untimed, right before the timed cancel). There, W4-load50 direct cancel p99 was 40 % *above*
+   the current index (411 vs 294 ns, same session). With a direct-indexed translation table (one
+   cache line) the gap is 5 % (247 vs 236 ns). Only the direct book does a translation, and only
+   cancels and modifies are affected, so the first session's direct cancel numbers are not used;
+   the files are kept.
+7. **The far tail** (p99.99, max) is again set by the machine: p99.99 of 3.6–4.9 µs in W4-load50
+   for all three books.
+
+### Recommendation (owner's decision)
+
+- Matching thread: **engine-issued handles** (`DirectOrderTable`). O(1) worst case by
+  construction, immune to chosen ids, and the flattest cancel distribution measured; client
+  references are mapped at the gateway (Part B).
+- Anywhere client ids must be indexed directly: `HardenedOrderIndex`, never the default
+  `OrderIndex` (finding 1).
+- The default locator is still `OrderIndex`; changing it is not done without your decision.
+
+### Results: A4 plain session (Clang 21.1.8, AC, Balanced; probe 42–44)
+
+Latencies in ns; median over 5 runs, min–max in small print.
+
+**w3-cancel70 / dense**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 43, 42, 42, 43, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 1467934 | 49.6 <sub>49.2–49.9</sub> | 68.5 <sub>68.1–68.5</sub> | 94.9 <sub>94.5–96.0</sub> | 133 <sub>128–139</sub> | 203 <sub>187–286</sub> | 57673 <sub>6311–96545</sub> |
+| cancel-hit-front | 1143558 | 54.9 <sub>54.2–54.9</sub> | 83.1 <sub>82.8–83.1</sub> | 121 <sub>121–122</sub> | 164 <sub>158–167</sub> | 291 <sub>200–321</sub> | 13726 <sub>5534–31610</sub> |
+| cancel-hit-middle | 1143553 | 49.2 <sub>49.2–49.9</sub> | 77.4 <sub>77.4–78.1</sub> | 115 <sub>113–116</sub> | 159 <sub>150–163</sub> | 336 <sub>209–4797</sub> | 23295 <sub>12256–54135</sub> |
+| cancel-hit-back | 1145020 | 47.8 <sub>47.8–47.8</sub> | 65.6 <sub>65.6–66.0</sub> | 92.8 <sub>92.4–93.1</sub> | 123 <sub>121–126</sub> | 210 <sub>173–274</sub> | 35176 <sub>24104–253557</sub> |
+| cancel-miss | 99935 | 35.3 <sub>35.3–35.3</sub> | 47.1 <sub>46.4–47.1</sub> | 66.4 <sub>65.6–66.7</sub> | 86.3 <sub>81.0–99.9</sub> | 130 <sub>118–317</sub> | 184 <sub>140–4779</sub> |
+
+**w3-cancel70 / dense-hardened**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 43, 42, 42, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 1467934 | 50.3 <sub>50.3–50.7</sub> | 69.9 <sub>69.9–69.9</sub> | 94.9 <sub>94.2–95.6</sub> | 140 <sub>138–143</sub> | 212 <sub>198–307</sub> | 16262 <sub>5809–34434</sub> |
+| cancel-hit-front | 1143558 | 55.7 <sub>55.7–56.0</sub> | 86.0 <sub>85.6–86.0</sub> | 125 <sub>125–127</sub> | 169 <sub>166–174</sub> | 276 <sub>234–4135</sub> | 59118 <sub>14015–76650</sub> |
+| cancel-hit-middle | 1143553 | 51.4 <sub>50.7–51.4</sub> | 79.6 <sub>79.6–79.9</sub> | 118 <sub>117–121</sub> | 163 <sub>157–172</sub> | 312 <sub>228–4763</sub> | 14699 <sub>11760–116977</sub> |
+| cancel-hit-back | 1145020 | 49.9 <sub>49.9–49.9</sub> | 68.8 <sub>68.8–68.8</sub> | 97.7 <sub>97.0–97.7</sub> | 131 <sub>130–134</sub> | 210 <sub>187–277</sub> | 59476 <sub>13548–102667</sub> |
+| cancel-miss | 99935 | 34.2 <sub>34.2–34.2</sub> | 46.4 <sub>45.7–46.4</sub> | 69.2 <sub>68.8–69.6</sub> | 90.6 <sub>87.4–109</sub> | 161 <sub>115–1384</sub> | 5646 <sub>163–18414</sub> |
+
+**w3-cancel70 / dense-direct**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 44, 42, 44, 42, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 1467934 | 37.1 <sub>36.7–37.5</sub> | 41.0 <sub>41.0–41.4</sub> | 48.5 <sub>48.5–52.1</sub> | 55.3 <sub>55.3–57.8</sub> | 65.6 <sub>63.5–72.8</sub> | 14715 <sub>6076–85876</sub> |
+| cancel-hit-front | 1143558 | 42.8 <sub>42.8–42.8</sub> | 48.5 <sub>48.5–48.5</sub> | 52.8 <sub>52.8–53.5</sub> | 58.5 <sub>57.8–60.3</sub> | 200 <sub>141–454</sub> | 17639 <sub>12216–24593</sub> |
+| cancel-hit-middle | 1143553 | 38.9 <sub>38.2–39.2</sub> | 45.7 <sub>45.3–46.4</sub> | 52.1 <sub>51.4–52.1</sub> | 58.9 <sub>57.8–71.0</sub> | 256 <sub>147–332</sub> | 13268 <sub>6454–65410</sub> |
+| cancel-hit-back | 1145020 | 37.1 <sub>37.1–37.5</sub> | 42.8 <sub>42.8–43.2</sub> | 48.9 <sub>48.5–49.2</sub> | 53.5 <sub>53.5–54.9</sub> | 118 <sub>75.3–148</sub> | 50336 <sub>5958–65746</sub> |
+| cancel-miss | 99935 | 18.9 <sub>18.9–18.9</sub> | 22.5 <sub>22.5–23.2</sub> | 24.6 <sub>23.9–25.3</sub> | 29.6 <sub>28.2–32.1</sub> | 44.9 <sub>29.6–4726</sub> | 79.6 <sub>33.5–4802</sub> |
+
+**w3-cancel90 / dense**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 43, 42, 42, 43, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 489702 | 49.6 <sub>49.2–49.6</sub> | 68.1 <sub>68.1–68.8</sub> | 95.6 <sub>95.2–98.1</sub> | 140 <sub>134–143</sub> | 327 <sub>234–348</sub> | 10134 <sub>5424–14582</sub> |
+| cancel-hit-front | 1471573 | 54.9 <sub>54.9–54.9</sub> | 83.1 <sub>82.8–83.1</sub> | 122 <sub>121–123</sub> | 166 <sub>165–168</sub> | 330 <sub>264–342</sub> | 54102 <sub>12977–76540</sub> |
+| cancel-hit-middle | 1469834 | 49.2 <sub>48.9–49.2</sub> | 76.7 <sub>76.7–77.1</sub> | 114 <sub>114–115</sub> | 160 <sub>155–162</sub> | 357 <sub>299–392</sub> | 16664 <sub>11290–32840</sub> |
+| cancel-hit-back | 1468771 | 47.8 <sub>47.1–47.8</sub> | 65.6 <sub>65.3–65.6</sub> | 92.0 <sub>91.7–92.4</sub> | 123 <sub>122–126</sub> | 205 <sub>184–212</sub> | 41762 <sub>6133–62018</sub> |
+| cancel-miss | 100120 | 35.3 <sub>35.0–35.3</sub> | 46.4 <sub>46.4–47.4</sub> | 66.0 <sub>64.9–66.4</sub> | 89.5 <sub>81.7–116</sub> | 241 <sub>153–5436</sub> | 6170 <sub>238–84649</sub> |
+
+**w3-cancel90 / dense-hardened**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 43, 42, 42, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 489702 | 50.7 <sub>49.9–50.7</sub> | 70.3 <sub>69.9–70.3</sub> | 95.6 <sub>94.9–97.0</sub> | 138 <sub>129–140</sub> | 194 <sub>174–221</sub> | 6690 <sub>5599–10935</sub> |
+| cancel-hit-front | 1471573 | 56.4 <sub>56.0–56.4</sub> | 86.0 <sub>86.0–86.0</sub> | 125 <sub>125–126</sub> | 168 <sub>167–170</sub> | 268 <sub>222–304</sub> | 13461 <sub>6360–97252</sub> |
+| cancel-hit-middle | 1469834 | 50.7 <sub>50.7–50.7</sub> | 79.6 <sub>79.2–79.6</sub> | 117 <sub>117–118</sub> | 160 <sub>158–162</sub> | 265 <sub>237–306</sub> | 21306 <sub>10100–31330</sub> |
+| cancel-hit-back | 1468771 | 49.9 <sub>49.9–49.9</sub> | 68.5 <sub>68.1–68.8</sub> | 95.6 <sub>95.6–97.7</sub> | 128 <sub>126–133</sub> | 199 <sub>179–262</sub> | 21390 <sub>6276–51297</sub> |
+| cancel-miss | 100120 | 34.2 <sub>34.2–34.2</sub> | 45.7 <sub>45.7–46.4</sub> | 67.4 <sub>66.0–68.8</sub> | 88.5 <sub>87.0–89.9</sub> | 131 <sub>109–217</sub> | 5168 <sub>146–5859</sub> |
+
+**w3-cancel90 / dense-direct**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 489702 | 37.5 <sub>37.1–37.5</sub> | 41.4 <sub>41.0–41.4</sub> | 48.5 <sub>48.5–48.5</sub> | 56.4 <sub>55.7–56.4</sub> | 129 <sub>117–248</sub> | 5244 <sub>4990–11950</sub> |
+| cancel-hit-front | 1471573 | 43.2 <sub>43.2–43.5</sub> | 49.2 <sub>49.2–49.2</sub> | 53.5 <sub>52.8–53.5</sub> | 61.4 <sub>59.9–66.0</sub> | 261 <sub>173–316</sub> | 55103 <sub>12516–89393</sub> |
+| cancel-hit-middle | 1469834 | 37.8 <sub>37.8–38.9</sub> | 44.9 <sub>44.9–46.4</sub> | 51.4 <sub>51.4–52.1</sub> | 60.6 <sub>58.5–120</sub> | 242 <sub>179–320</sub> | 11888 <sub>11005–93357</sub> |
+| cancel-hit-back | 1468771 | 37.5 <sub>36.7–37.5</sub> | 42.8 <sub>42.8–42.8</sub> | 48.5 <sub>48.5–49.2</sub> | 54.2 <sub>53.5–54.9</sub> | 136 <sub>108–158</sub> | 7958 <sub>5781–28399</sub> |
+| cancel-miss | 100120 | 18.9 <sub>18.9–18.9</sub> | 23.2 <sub>22.8–23.2</sub> | 25.3 <sub>24.6–27.8</sub> | 29.6 <sub>28.2–31.0</sub> | 46.4 <sub>41.4–118</sub> | 176 <sub>55.3–4783</sub> |
+
+**w4-collide / dense**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 237751 | 6495 <sub>6495–6506</sub> | 6512 <sub>6512–6586</sub> | 6649 <sub>6604–6786</sub> | 10582 <sub>10490–15456</sub> | 66027 <sub>56803–73287</sub> | 204328 <sub>68817–593822</sub> |
+| cancel-hit | 237239 | 7072 <sub>7026–7077</sub> | 7694 <sub>7694–7705</sub> | 7854 <sub>7848–7865</sub> | 11701 <sub>11495–18596</sub> | 63972 <sub>56529–68675</sub> | 98329 <sub>79367–326314</sub> |
+| cancel-miss | 25010 | 3881 <sub>3881–3881</sub> | 3889 <sub>3889–3889</sub> | 3941 <sub>3901–3967</sub> | 7859 <sub>7089–12580</sub> | 35904 <sub>10352–60705</sub> | 35904 <sub>10352–60705</sub> |
+
+**w4-collide / dense-hardened**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 237751 | 56.7 <sub>56.4–57.1</sub> | 63.1 <sub>63.1–64.2</sub> | 126 <sub>124–149</sub> | 265 <sub>232–312</sub> | 370 <sub>348–9178</sub> | 13950 <sub>4767–58227</sub> |
+| cancel-hit | 237239 | 59.9 <sub>59.9–69.6</sub> | 76.0 <sub>75.3–89.5</sub> | 96.3 <sub>95.2–134</sub> | 150 <sub>142–261</sub> | 358 <sub>296–4800</sub> | 10836 <sub>6101–105276</sub> |
+| cancel-miss | 25010 | 52.8 <sub>52.8–53.5</sub> | 60.6 <sub>60.6–62.1</sub> | 120 <sub>118–147</sub> | 207 <sub>145–342</sub> | 5531 <sub>258–61234</sub> | 5531 <sub>258–61234</sub> |
+
+**w4-collide / dense-direct**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 237751 | 37.5 <sub>37.5–37.8</sub> | 42.8 <sub>42.5–42.8</sub> | 51.4 <sub>49.9–51.4</sub> | 58.5 <sub>57.1–59.9</sub> | 103 <sub>81.0–420</sub> | 5267 <sub>269–13418</sub> |
+| cancel-hit | 237239 | 50.7 <sub>49.9–57.1</sub> | 69.9 <sub>68.8–75.3</sub> | 84.2 <sub>83.8–86.0</sub> | 91.3 <sub>90.6–92.8</sub> | 162 <sub>127–310</sub> | 6168 <sub>4803–101565</sub> |
+| cancel-miss | 25010 | 22.5 <sub>22.5–22.8</sub> | 27.5 <sub>26.8–27.5</sub> | 28.9 <sub>28.5–28.9</sub> | 40.7 <sub>39.6–44.2</sub> | 54.2 <sub>46.4–5421</sub> | 54.2 <sub>46.4–5421</sub> |
+
+**w4-load50 / dense**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2498829 | 79.6 <sub>79.6–80.3</sub> | 103 <sub>103–104</sub> | 139 <sub>137–143</sub> | 200 <sub>187–209</sub> | 490 <sub>407–1440</sub> | 31376 <sub>18255–131542</sub> |
+| cancel-hit | 2501171 | 119 <sub>118–120</sub> | 163 <sub>158–165</sub> | 236 <sub>225–243</sub> | 386 <sub>347–394</sub> | 4943 <sub>4897–6187</sub> | 79444 <sub>64101–108290</sub> |
+
+**w4-load50 / dense-hardened**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 42, 42, 42
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2498829 | 80.3 <sub>80.3–80.3</sub> | 105 <sub>105–106</sub> | 141 <sub>139–149</sub> | 204 <sub>199–238</sub> | 1438 <sub>456–1481</sub> | 74099 <sub>38430–908331</sub> |
+| cancel-hit | 2501171 | 118 <sub>117–120</sub> | 163 <sub>161–173</sub> | 239 <sub>233–263</sub> | 383 <sub>372–415</sub> | 4928 <sub>4866–5411</sub> | 67161 <sub>32656–82010</sub> |
+
+**w4-load50 / dense-direct**: churn 0.00 levels/op; pmr upstream allocations per run: 0, 0, 0, 0, 0; clock probe per run (ticks): 42, 42, 44, 43, 43
+
+| class | ops | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| add-passive | 2498829 | 37.8 <sub>37.5–37.8</sub> | 42.8 <sub>42.5–42.8</sub> | 53.5 <sub>53.5–53.5</sub> | 62.8 <sub>61.7–63.5</sub> | 162 <sub>151–163</sub> | 67662 <sub>17174–96018</sub> |
+| cancel-hit | 2501171 | 93.1 <sub>92.4–94.2</sub> | 139 <sub>122–149</sub> | 247 <sub>232–263</sub> | 403 <sub>392–410</sub> | 3613 <sub>1083–3907</sub> | 626230 <sub>17899–969460</sub> |

@@ -32,6 +32,9 @@ no release yet; the CMake project version is 0.1.0.
   (1,000,000 steps × 5 seeds). Zero-allocation test for every book type. Requirements FR-08,
   FR-26, FR-43, FR-44; ADR 0003.
 - `eigenbook_latency --book map,map-m1,map-m2,dense,hybrid|all|both`, `--hybrid-window`.
+- Phase A4 measurements (`docs/BENCHMARKS.md`, `bench/results/a4-clang-21.1.8*`) and
+  `docs/RESULTS_SUMMARY.md`. Harness: id translation for issuing books uses a direct-indexed table
+  for dense ids (the sorted-lookup version polluted the cache before timed cancels).
 - Phase A3 measurements (`docs/BENCHMARKS.md`, `bench/results/a3-clang-21.1.8*`): node
   allocation explains little of the map ladder's latency; dense / hybrid are 2–3× faster through
   p99.9; the hybrid matches dense when its window covers the active band.

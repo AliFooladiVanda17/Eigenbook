@@ -1,6 +1,6 @@
 # Phase A: standard layout, latency harness, map-ladder tail, cancel-path tail
 
-Status: A0, A1, A2 (results provisional: unstable clock), A3 done; A4a (code + tests) done; A4b next.
+Status: Part A done (A0–A4). A2 results provisional (unstable clock); A3 / A4 measured on AC, Balanced plan.
 
 ## A0 recon results
 
@@ -422,8 +422,23 @@ W3-90, W4-collide, W4-load50 for `dense` (current index), `dense-hardened`, `den
   hash would be stronger and slower; the probe-distance guard bounds the damage either way.
 - 32-bit generations wrap after 2³² reuses of one slot; a handle that old would then match again.
 
+### As built (A4)
+
+- `HardenedIndexConfig::maxProbe` default 128: 32 refused legitimate ids at load 1/2 (W4-load50).
+- The harness's id translation for issuing books first used a binary search over sorted ids; that
+  polluted the cache right before timed cancels (W4-load50 direct cancel p99 +40 % vs the hash
+  index in that session). Replaced by a direct-indexed table for dense ids (+5 %); both sessions
+  are kept and described in `docs/BENCHMARKS.md`.
+- Hardened index seed: random per instance in the benchmark (std::random_device), so its layout
+  differs between runs; the probe limit was never reached (0 refused ids in every run).
+
 ## Part A exit criteria
 
 All tests green in Debug, Release, and ASan+UBSan (clang on Windows here; GCC/Linux only in CI,
 which is Part B12), zero-allocation test green, package-consumer test green,
 `docs/BENCHMARKS.md` + `bench/results/*.csv`, `docs/RESULTS_SUMMARY.md`.
+
+Check at the end of Phase A (see the final report): met on Windows (MSVC 19.44, Clang 21.1.8:
+Debug, Release, ASan, ASan+UBSan); **not met for GCC / Linux** (no toolchain here; the Linux
+platform code has never been compiled); benchmarks provisional in A2 and on the Balanced power
+plan in A3 / A4.
