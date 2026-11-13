@@ -21,8 +21,10 @@ Only the current `main` branch receives fixes.
 The following are known and scheduled (see [README: Known limitations](README.md#known-limitations)
 and [docs/plans/](docs/plans/)); reports about them are welcome but not needed:
 
-- Order ids are hashed with a public, invertible mixer: colliding ids can be constructed to slow
-  down the cancel path (HashDoS) when ids are client-chosen.
+- The default order index (`OrderIndex`) hashes ids with a public, invertible mixer: colliding ids
+  can be constructed to slow down the cancel path (HashDoS) when ids are client-chosen. Mitigations
+  exist as alternative locators: `HardenedOrderIndex` (keyed hash with a per-instance seed, bounded
+  probe distance) and `DirectOrderTable` (engine-issued handles, no hashing); see ADR 0004.
 - Unchecked `Price` / `Quantity` arithmetic on extreme inputs.
 - No ownership check on cancel / modify.
 - Allocation (and `std::bad_alloc`) is possible on the insert path beyond the reserved capacity.

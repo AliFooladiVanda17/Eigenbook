@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <random>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -148,6 +149,7 @@ struct Books {
     OrderBookM2 m2;
     DenseOrderBook dense;
     HybridOrderBook hybrid;
+    DenseOrderBookHardened hardened; // fixed capacity: sized well above the live set
 
     Books(const Price denseMin, const std::size_t denseTicks, const Price hybridBase)
         : m0(kInstrument, {}, 16)
@@ -161,7 +163,8 @@ struct Books {
                   .maxLevels = 1 << 16,
                   .maxShiftsPerOp = 16,
                   .maxMovesPerOp = 4},
-                 16) {}
+                 16)
+        , hardened(kInstrument, {.minPrice = denseMin, .tickCount = denseTicks}, 1 << 16) {}
 
     template <typename F>
     void each(F&& f) {
@@ -170,6 +173,7 @@ struct Books {
         f("map-m2", m2);
         f("dense", dense);
         f("hybrid", hybrid);
+        f("dense-hardened", hardened);
     }
 };
 
@@ -190,7 +194,7 @@ void runDifferential(Books& books,
         onStep(rng);
         const auto op = rng() % 10;
         std::vector<Fill> refFills;
-        std::vector<FillLog> logs(5);
+        std::vector<FillLog> logs(6);
         std::size_t k = 0;
 
         if (op < 6 || reference.orders.empty()) {
@@ -304,6 +308,88 @@ TEST(OrderBookDifferential, AllLaddersAgreeUnderADriftingMid) {
         ASSERT_FALSE(::testing::Test::HasFatalFailure()) << "seed " << seed;
         EXPECT_GT(books.hybrid.bids().levelsMoved() + books.hybrid.asks().levelsMoved(), 0u)
             << "seed " << seed;
+    }
+}
+
+// The book with engine-issued handles (DirectOrderTable) against the same reference. The reference
+// keeps its own sequential ids; the test maps them to the book's handles (and back, to compare
+// fills).
+TEST(OrderBookDifferential, DirectHandlesAgreeWithTheReference) {
+    for (std::uint64_t seed = 1; seed <= kLongSeeds; ++seed) {
+        DenseOrderBookDirect book(kInstrument, {.minPrice = {0}, .tickCount = 1 << 20}, 1 << 16);
+        ReferenceBook reference;
+        std::unordered_map<std::uint64_t, OrderId> toHandle;
+        std::unordered_map<std::uint64_t, std::uint64_t> toRef;
+        std::mt19937_64 rng(seed);
+        std::uint64_t nextId = 1;
+        std::int64_t mid = 500'000;
+        auto price = [&] {
+            return mid - 20 + static_cast<std::int64_t>(rng() % 41);
+        };
+        auto forget = [&](const std::uint64_t refId) {
+            toRef.erase(toHandle.at(refId).value);
+            toHandle.erase(refId);
+        };
+        for (int step = 0; step < kLongSteps; ++step) {
+            if (rng() % 1000 < 300) {
+                mid += rng() % 2 ? 1 : -1;
+            }
+            const auto op = rng() % 10;
+            FillLog log;
+            std::vector<Fill> refFills;
+            std::uint64_t subject = 0; // reference id of the order this step adds or modifies
+            if (op < 6 || reference.orders.empty()) {
+                subject = nextId++;
+                const OrderSide side = rng() % 2 ? OrderSide::BUY : OrderSide::SELL;
+                const OrderType type = rng() % 12 == 0 ? OrderType::MARKET : OrderType::LIMIT;
+                const std::int64_t p = price();
+                const std::uint64_t qty = 1 + rng() % 50;
+                refFills = reference.add(subject, side, type, p, qty);
+                const auto handle = book.reserveOrderId();
+                ASSERT_TRUE(handle);
+                toHandle.emplace(subject, *handle);
+                toRef.emplace(handle->value, subject);
+                ASSERT_TRUE(book.addOrder({*handle, side, type, {p}, {qty}, {subject}}, log))
+                    << step;
+            } else {
+                const auto victim = reference.orders[rng() % reference.orders.size()];
+                const OrderId handle = toHandle.at(victim.id);
+                if (op < 8) {
+                    ASSERT_TRUE(reference.cancel(victim.id));
+                    ASSERT_TRUE(book.cancelOrder(handle)) << step;
+                    forget(victim.id);
+                } else {
+                    subject = victim.id;
+                    const std::int64_t p = rng() % 2 ? victim.price : price();
+                    const std::uint64_t qty = 1 + rng() % 60;
+                    refFills = reference.modify(victim.id, p, qty);
+                    ASSERT_TRUE(book.modifyOrder({handle, {p}, {qty}, {nextId}}, log)) << step;
+                }
+            }
+            // Translate the book's fills back to reference ids, then retire handles that left.
+            ASSERT_EQ(log.fills.size(), refFills.size()) << step;
+            for (std::size_t k = 0; k < refFills.size(); ++k) {
+                Fill f = log.fills[k];
+                f.makerId = {toRef.at(f.makerId.value)};
+                f.takerId = {toRef.at(f.takerId.value)};
+                ASSERT_TRUE(sameFills({f}, {refFills[k]})) << step;
+            }
+            for (const Fill& f : log.fills) {
+                if (f.makerFilled) {
+                    forget(toRef.at(f.makerId.value));
+                }
+            }
+            if (subject != 0 && toHandle.contains(subject) &&
+                book.findOrder(toHandle.at(subject)) == nullptr) {
+                forget(subject); // filled in full or market remainder: its handle is gone
+            }
+            ASSERT_EQ(book.orderCount(), reference.orders.size()) << step;
+            ASSERT_EQ(toHandle.size(), reference.orders.size()) << step;
+            if (step % 256 == 0) {
+                ASSERT_EQ(depth(book, OrderSide::BUY), depth(reference, OrderSide::BUY)) << step;
+                ASSERT_EQ(depth(book, OrderSide::SELL), depth(reference, OrderSide::SELL)) << step;
+            }
+        }
     }
 }
 

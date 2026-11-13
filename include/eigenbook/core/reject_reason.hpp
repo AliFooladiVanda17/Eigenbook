@@ -10,7 +10,9 @@ enum class RejectReason : std::uint8_t {
     DUPLICATE_ORDER_ID, // id already resting in this book
     PRICE_OUT_OF_RANGE, // limit price outside the ladder's tick range (dense ladder only)
     UNKNOWN_ORDER_ID,   // cancel / modify of an order that is not resting
-    CAPACITY_EXCEEDED,  // the order would need a new price level and the ladder is full
+    CAPACITY_EXCEEDED, // the order would need a new price level (or locator slot) that is not there
+    INVALID_ORDER_ID,  // the book issues ids and did not issue this one, or it is stale
+    ORDER_ID_REJECTED, // the hardened index refuses an id it could only store too far from home
 };
 
 } // namespace eigenbook

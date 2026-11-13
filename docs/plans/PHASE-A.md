@@ -1,6 +1,6 @@
 # Phase A: standard layout, latency harness, map-ladder tail, cancel-path tail
 
-Status: A0, A1, A2 (results provisional: unstable clock), A3 done; A4 next.
+Status: A0, A1, A2 (results provisional: unstable clock), A3 done; A4a (code + tests) done; A4b next.
 
 ## A0 recon results
 
@@ -389,12 +389,38 @@ three.
   (p99.9); dense / hybrid are 2–3× faster than any map variant through p99.9. See
   `docs/BENCHMARKS.md`, Phase A3.
 
-## A4: cancel-path tail (outline)
+## A4: cancel-path tail
 
-`EIGENBOOK_INSTRUMENT_INDEX` probe/shift histograms; `OrderLocator` concept;
-`book/locator/direct_order_table.hpp` (slot index + generation in the 64-bit `OrderId`);
-hardened hash index (per-instance random seed, max-probe guard with a counted reject). W3/W4
-tables for the three locators.
+Two checkpoints again: **A4a** code + tests, **A4b** measurements + Part A deliverables.
+
+### File-by-file (A4a)
+
+| File | Change |
+|---|---|
+| `core/reject_reason.hpp` | `INVALID_ORDER_ID` (add with an id the book did not issue, or a stale one), `ORDER_ID_REJECTED` (the hardened index refuses an id whose probe distance would exceed its limit) |
+| `book/locator/order_locator.hpp` | `OrderLocator` concept: `find`, `admit` (before matching: Ok / Duplicate / NotIssued / Full / ProbeLimit), `insert` (only after `admit == Ok`, cannot fail), `erase`, `unbind` (order leaves the book but keeps its id: modify re-entry), `abandon` (admitted id that did not rest), `size`, `empty` |
+| `book/locator/hash_order_index.hpp` | `OrderIndex` (unchanged behaviour: client ids, grows) gains the concept's `admit` / `unbind` / `abandon` |
+| `book/locator/hardened_hash_index.hpp` | `HardenedOrderIndex`: same table layout, keyed hash `hash(id ^ seed)` with a per-instance random seed (`std::random_device` unless configured), fixed capacity (load ≤ 1/2, no rehash: full → `CAPACITY_EXCEEDED`), max probe distance `maxProbe`: an insert that would land further than that from its home is refused (`ORDER_ID_REJECTED`, counted). Since every stored key is within `maxProbe` of its home, `find` stops after `maxProbe + 1` slots |
+| `book/locator/direct_order_table.hpp` | `DirectOrderTable`: fixed slot array + free list; `OrderId` = generation (high 32 bits) ∥ slot (low 32 bits); `issue()` reserves a slot and returns its handle; lookup = one index + one generation compare; every release bumps the generation, so stale or duplicated handles fail; full → `CAPACITY_EXCEEDED` |
+| `book/order_book.hpp` | `BasicOrderBook<Ladder, Locator = OrderIndex>`; uses only the concept; `reserveOrderId()` / `releaseOrderId()` for issuing locators; aliases `DenseOrderBookHardened`, `DenseOrderBookDirect` (and `OrderBookHardened` / `OrderBookDirect` on M2) |
+| `bench/harness/books.hpp`, `bench/latency/main.cpp`, `bench/harness/executor.hpp` | Book types `dense-hardened`, `dense-direct`; for issuing books the harness translates workload ids to handles outside the timed region (sorted id table built before warm-up) and times `reserveOrderId()` + `addOrder` together for adds; instrumented build writes full probe / shift distributions to CSV |
+| Tests | locator unit tests (direct: stale / duplicate / full / generation wrap behaviour; hardened: seed changes placement, probe guard with a crafted cluster, bounded find, churn vs `unordered_map`); book tests for issuing locators; typed book tests and differential test include the hardened book; differential test for the direct book with id translation; zero-allocation test for both new books |
+
+### A4b
+
+Instrumented run (current index) on W3 and W4: probe and shift distributions. Plain runs of W3-70,
+W3-90, W4-collide, W4-load50 for `dense` (current index), `dense-hardened`, `dense-direct`.
+`docs/RESULTS_SUMMARY.md`; Part A exit check.
+
+### Risks
+
+- Engine-issued handles change the add flow (reserve, then add); the book keeps the client-id
+  flow unchanged for hash locators. Client references are mapped to handles at the gateway
+  (Part B), not in the book.
+- The keyed hash is a splitmix64 finalizer over `id ^ seed`, not a cryptographic PRF; it stops
+  an attacker who does not know the seed from building clusters offline. A SipHash-class keyed
+  hash would be stronger and slower; the probe-distance guard bounds the damage either way.
+- 32-bit generations wrap after 2³² reuses of one slot; a handle that old would then match again.
 
 ## Part A exit criteria
 

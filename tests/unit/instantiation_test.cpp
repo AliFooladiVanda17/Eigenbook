@@ -18,6 +18,10 @@ template class eigenbook::BasicOrderBook<eigenbook::MapPriceLadderM1>;
 template class eigenbook::BasicOrderBook<eigenbook::MapPriceLadderM2>;
 template class eigenbook::BasicOrderBook<eigenbook::ArrayPriceLadder>;
 template class eigenbook::BasicOrderBook<eigenbook::HybridPriceLadder>;
+template class eigenbook::BasicOrderBook<eigenbook::ArrayPriceLadder, eigenbook::HardenedOrderIndex>;
+template class eigenbook::BasicOrderBook<eigenbook::ArrayPriceLadder, eigenbook::DirectOrderTable>;
+template class eigenbook::BasicOrderBook<eigenbook::MapPriceLadderM2, eigenbook::HardenedOrderIndex>;
+template class eigenbook::BasicOrderBook<eigenbook::MapPriceLadderM2, eigenbook::DirectOrderTable>;
 
 template class eigenbook::BasicMapPriceLadder<eigenbook::OrderSide::BUY, eigenbook::MapNodesOnHeap>;
 template class eigenbook::BasicMapPriceLadder<eigenbook::OrderSide::SELL, eigenbook::MapNodesOnHeap>;

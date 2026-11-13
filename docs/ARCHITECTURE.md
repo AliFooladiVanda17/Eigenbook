@@ -31,7 +31,9 @@ machine over that log (Phase B3).
 |---|---|---|
 | Order storage | Fixed-size object pool with an intrusive free list; chunks of up to 4096 slots | `util/object_pool.hpp` |
 | Order node | `Order`, exactly 64 bytes, `alignas(64)`; also the intrusive list node | `core/order.hpp` |
-| Order index | `OrderId → Order*`, open addressing, linear probing, power-of-two table, load ≤ 1/2, backward-shift deletion, splitmix64 finalizer as hash | `book/locator/hash_order_index.hpp` |
+| Order locator (default) | `OrderIndex`: `OrderId → Order*`, open addressing, linear probing, power-of-two table, load ≤ 1/2, backward-shift deletion, splitmix64 finalizer as hash; grows | `book/locator/hash_order_index.hpp` |
+| Order locator (hardened) | `HardenedOrderIndex`: same table, hash of `id ^ seed` with a per-instance random seed, probe distance ≤ `maxProbe`, fixed capacity | `book/locator/hardened_hash_index.hpp` |
+| Order locator (direct) | `DirectOrderTable`: slot array + free list; handle = generation ∥ slot, issued by the book; lookup = one index + one compare | `book/locator/direct_order_table.hpp` |
 | Price level | Intrusive doubly linked FIFO list plus aggregate quantity and count | `book/price_level.hpp` |
 | Price ladder (sparse) | `std::pmr::map<Price, PriceLevel>`; node memory by compile-time policy: M0 `unsynchronized_pool_resource` over the heap, M1 the same pool over a preallocated arena with no upstream, M2 a preallocated single-size free list | `book/ladder/map_ladder.hpp`, `util/fixed_block_resource.hpp` |
 | Price ladder (dense) | One preallocated `PriceLevel` per tick + two-level occupancy bitmap + cached best index | `book/ladder/dense_ladder.hpp`, `util/level_bitmap.hpp` |
@@ -107,7 +109,7 @@ T = ticks between the old best and the next non-empty level (dense ladder).
 |---|---|---|
 | Best bid / ask | O(1) | O(1) (cached index) |
 | Rest a limit order | O(log P) (`try_emplace` searches even when the level exists) | O(1) |
-| Order lookup by id (cancel, modify) | Expected O(1); worst case is the length of the probe cluster | same |
+| Order lookup by id (cancel, modify) | `OrderIndex`: expected O(1), worst case the probe cluster; `HardenedOrderIndex`: ≤ `maxProbe` + 1 slots; `DirectOrderTable`: O(1) | same |
 | Cancel, level stays non-empty | Lookup + O(1) unlink | same |
 | Cancel that empties a level | + O(log P) erase (O(1) amortised if it is the best level) | + O(1), or, if it was the best level, a bitmap scan of O(1 + T/4096) words (one summary word covers 4096 ticks) |
 | Modify: reduce at same price | Lookup + O(1) | same |

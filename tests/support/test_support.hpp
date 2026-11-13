@@ -104,7 +104,23 @@ struct BookFactory<HybridOrderBook> {
     }
 };
 
-using AllBookTypes =
-    ::testing::Types<OrderBook, OrderBookM1, OrderBookM2, DenseOrderBook, HybridOrderBook>;
+// Client ids, keyed hash (random seed), fixed capacity.
+template <>
+struct BookFactory<DenseOrderBookHardened> {
+    static std::unique_ptr<DenseOrderBookHardened> make() {
+        return std::make_unique<DenseOrderBookHardened>(
+            kInstrument,
+            DenseOrderBookHardened::LadderConfig{.minPrice = {0}, .tickCount = 1000});
+    }
+};
+
+// Every book that takes client-chosen ids. (DenseOrderBookDirect issues its own ids and has its
+// own tests.)
+using AllBookTypes = ::testing::Types<OrderBook,
+                                      OrderBookM1,
+                                      OrderBookM2,
+                                      DenseOrderBook,
+                                      HybridOrderBook,
+                                      DenseOrderBookHardened>;
 
 } // namespace eigenbook

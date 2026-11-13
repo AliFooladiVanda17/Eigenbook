@@ -103,6 +103,32 @@ struct BookTraits<HybridOrderBook> {
     }
 };
 
+// Dense ladder with the A4 locators: hardened client-id index (random seed) and engine-issued
+// handles (DirectOrderTable).
+template <>
+struct BookTraits<DenseOrderBookHardened> {
+    static constexpr std::string_view name = "dense-hardened";
+
+    static std::unique_ptr<DenseOrderBookHardened> make(const Workload& w) {
+        return std::make_unique<DenseOrderBookHardened>(
+            InstrumentId{1},
+            ArrayLadderConfig{.minPrice = w.minPrice, .tickCount = w.tickCount()},
+            w.expectedOrders);
+    }
+};
+
+template <>
+struct BookTraits<DenseOrderBookDirect> {
+    static constexpr std::string_view name = "dense-direct";
+
+    static std::unique_ptr<DenseOrderBookDirect> make(const Workload& w) {
+        return std::make_unique<DenseOrderBookDirect>(
+            InstrumentId{1},
+            ArrayLadderConfig{.minPrice = w.minPrice, .tickCount = w.tickCount()},
+            w.expectedOrders);
+    }
+};
+
 // Calls f.template operator()<Book>() for every book type, in a fixed order.
 template <typename F>
 void forEachBookType(F&& f) {
@@ -111,6 +137,8 @@ void forEachBookType(F&& f) {
     f.template operator()<OrderBookM2>();
     f.template operator()<DenseOrderBook>();
     f.template operator()<HybridOrderBook>();
+    f.template operator()<DenseOrderBookHardened>();
+    f.template operator()<DenseOrderBookDirect>();
 }
 
 } // namespace eigenbook::bench

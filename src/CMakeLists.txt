@@ -21,7 +21,10 @@ target_sources(eigenbook_book
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/map_ladder.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/dense_ladder.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/hybrid_ladder.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/locator/order_locator.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/locator/hash_order_index.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/locator/hardened_hash_index.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/locator/direct_order_table.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/order_book.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/util/level_bitmap.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/util/object_pool.hpp

@@ -10,6 +10,14 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- Order locators (`OrderLocator` concept; `BasicOrderBook<Ladder, Locator = OrderIndex>`):
+  `DirectOrderTable` (engine-issued handles = generation ∥ slot, `reserveOrderId()` /
+  `releaseOrderId()`, O(1) worst-case lookup, stale handles rejected) and `HardenedOrderIndex`
+  (keyed hash with a per-instance seed, probe distance ≤ `maxProbe`, fixed capacity); books
+  `DenseOrderBookHardened`, `DenseOrderBookDirect`, `OrderBookM2Hardened`, `OrderBookM2Direct`;
+  reject reasons `INVALID_ORDER_ID`, `ORDER_ID_REJECTED`; requirements FR-27, FR-28, NFR-18,
+  NFR-19; ADR 0004. Harness books `dense-hardened`, `dense-direct`; instrumented build writes
+  `index_probes_*.csv`.
 - `RejectReason::CAPACITY_EXCEEDED`: a bounded ladder that cannot take a new price level rejects
   the add (before any matching) or the modify (order unchanged) instead of allocating.
   `PriceLadder` concept: `canRestAt(price)`.

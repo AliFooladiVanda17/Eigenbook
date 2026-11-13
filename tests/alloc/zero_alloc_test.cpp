@@ -310,16 +310,17 @@ void expectNoAllocationInMeasuredPart(const Workload& w,
                                       std::unique_ptr<Book> book,
                                       const std::string_view bookName) {
     std::uint64_t mismatches = 0;
+    Runner<Book> runner(*book, w); // built before the counted window (it allocates its id table)
     std::uint32_t fills = 0;
     for (std::size_t i = 0; i < w.warmupOps; ++i) {
         fills = 0;
-        const bool ok = runOp(*book, w.ops[i], fills);
+        const bool ok = runner.step(w.ops[i], fills);
         mismatches += outcomeMatches(w.ops[i], ok, fills) ? 0 : 1;
     }
     const Counted c = counted([&] {
         for (std::size_t i = w.warmupOps; i < w.ops.size(); ++i) {
             fills = 0;
-            const bool ok = runOp(*book, w.ops[i], fills);
+            const bool ok = runner.step(w.ops[i], fills);
             mismatches += outcomeMatches(w.ops[i], ok, fills) ? 0 : 1;
         }
     });
@@ -409,6 +410,14 @@ TEST(ZeroAllocation, MapM2BookMeasuredPartOfEveryWorkload) {
 
 TEST(ZeroAllocation, DenseBookMeasuredPartOfEveryWorkload) {
     everyWorkloadOn<DenseOrderBook>();
+}
+
+TEST(ZeroAllocation, DenseHardenedBookMeasuredPartOfEveryWorkload) {
+    everyWorkloadOn<DenseOrderBookHardened>();
+}
+
+TEST(ZeroAllocation, DenseDirectBookMeasuredPartOfEveryWorkload) {
+    everyWorkloadOn<DenseOrderBookDirect>();
 }
 
 TEST(ZeroAllocation, HybridBookMeasuredPartOfEveryWorkload) {

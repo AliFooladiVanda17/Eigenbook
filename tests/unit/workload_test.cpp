@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <harness/books.hpp>
 #include <harness/executor.hpp>
 #include <workloads/w1_baseline.hpp>
 #include <workloads/w2_level_churn.hpp>
@@ -60,34 +61,25 @@ bool sameOp(const Op& a, const Op& b) {
            a.quantity == b.quantity && a.timestamp == b.timestamp && a.scheduledNs == b.scheduledNs;
 }
 
-template <typename Book>
-std::unique_ptr<Book> bookFor(const Workload& w);
-
-template <>
-std::unique_ptr<OrderBook> bookFor<OrderBook>(const Workload& w) {
-    return std::make_unique<OrderBook>(InstrumentId{1}, MapLadderConfig{}, w.expectedOrders);
-}
-
-template <>
-std::unique_ptr<DenseOrderBook> bookFor<DenseOrderBook>(const Workload& w) {
-    return std::make_unique<DenseOrderBook>(
-        InstrumentId{1},
-        ArrayLadderConfig{.minPrice = w.minPrice, .tickCount = w.tickCount()},
-        w.expectedOrders);
-}
-
+// Replays the stream through the same Runner the benchmark uses (id translation for books that
+// issue their own handles).
 template <typename Book>
 void expectReplayMatches(const Workload& w) {
-    auto book = bookFor<Book>(w);
+    auto book = BookTraits<Book>::make(w);
+    Runner<Book> runner(*book, w);
     for (std::size_t i = 0; i < w.ops.size(); ++i) {
         const Op& op = w.ops[i];
+        Op effective = runner.prepare(op);
         if (op.kind == OpKind::CANCEL && op.expected != OpClass::CANCEL_MISS) {
-            ASSERT_NE(book->findOrder(op.id), nullptr)
-                << w.name << " op " << i << ": cancel of a non-resting order";
+            ASSERT_NE(book->findOrder(effective.id), nullptr)
+                << BookTraits<Book>::name << " " << w.name << " op " << i
+                << ": cancel of a non-resting order";
         }
         std::uint32_t fills = 0;
-        const bool ok = runOp(*book, op, fills);
-        ASSERT_TRUE(outcomeMatches(op, ok, fills)) << w.name << " op " << i;
+        const bool ok = runner.run(effective, fills);
+        runner.finish(op, effective);
+        ASSERT_TRUE(outcomeMatches(op, ok, fills))
+            << BookTraits<Book>::name << " " << w.name << " op " << i;
     }
 }
 
@@ -107,6 +99,7 @@ TEST(Workloads, SameSeedGivesTheSameStream) {
     EXPECT_FALSE(sameOp(a[1].ops[a[1].warmupOps + 10], c[1].ops[c[1].warmupOps + 10]));
 }
 
+// (Name kept for requirement traceability; it now replays on every book type.)
 TEST(Workloads, ReplayOnBothBooksMatchesThePrediction) {
     for (const Workload& w : smallWorkloads(9)) {
         ASSERT_GT(w.timedOps, 0u) << w.name;
@@ -115,8 +108,8 @@ TEST(Workloads, ReplayOnBothBooksMatchesThePrediction) {
                                         [](const Op& o) { return o.timed; }),
                   0)
             << w.name << ": a warm-up op is marked timed";
-        expectReplayMatches<OrderBook>(w);
-        expectReplayMatches<DenseOrderBook>(w);
+        forEachBookType([&]<typename Book>() { expectReplayMatches<Book>(w); });
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
     }
 }
 

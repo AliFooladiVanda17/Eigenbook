@@ -15,6 +15,8 @@ add_executable(eigenbook_tests
         unit/capacity_test.cpp
         unit/fixed_block_resource_test.cpp
         unit/hybrid_ladder_test.cpp
+        unit/locator_test.cpp
+        unit/locator_book_test.cpp
         differential/differential_test.cpp
 )
 

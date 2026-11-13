@@ -39,7 +39,9 @@ owned by a single thread so that matching needs no locks.
 
 - **Price-time priority matching** for limit and market orders, with partial fills and
   multi-level sweeps. Every execution is at the resting order's price.
-- **Cancel and modify through a flat order index** (open addressing, linear probing): expected
+- **Cancel and modify through an order locator:** by default a flat hash index (open addressing,
+  linear probing) with client-chosen ids; or a hardened variant (keyed hash, bounded probes); or
+  engine-issued handles with an O(1) worst-case lookup (`DenseOrderBookDirect`). Hash index: expected
   O(1) lookup. Reducing quantity at the same price keeps time priority; any other change
   re-enters the order.
 - **Price-ladder strategies** behind one C++20 concept (`PriceLadder`):
@@ -79,8 +81,9 @@ named there. Until then, do not expose the book to untrusted input.
   no price protection on market orders, no maximum order size.
 - `Quantity` / `Price` arithmetic is unchecked; the dense ladder's range check computes
   `price - minPrice` in signed 64-bit, which overflows for extreme prices.
-- The order index hash is a public, invertible mixer, so colliding client-chosen ids can be
-  constructed; erase and lookup have no O(1) worst case.
+- The default order index hash is a public, invertible mixer, so colliding client-chosen ids can be
+  constructed; erase and lookup have no O(1) worst case. Use `HardenedOrderIndex` (client ids) or
+  `DirectOrderTable` (engine-issued handles, O(1) worst case) where that matters (ADR 0004).
 - Timestamps are supplied by the caller.
 
 ---
@@ -273,12 +276,14 @@ ctest --preset dev-debug          # or msvc-debug, asan-ubsan, msvc-asan, ...
 | [tests/unit/capacity_test.cpp](tests/unit/capacity_test.cpp) | `CAPACITY_EXCEEDED` for adds and modifies on every bounded book |
 | [tests/unit/hybrid_ladder_test.cpp](tests/unit/hybrid_ladder_test.cpp) | Hybrid window, overflow maps, recentering, invariants |
 | [tests/unit/fixed_block_resource_test.cpp](tests/unit/fixed_block_resource_test.cpp) | The M2 single-size block resource |
+| [tests/unit/locator_test.cpp](tests/unit/locator_test.cpp) | Direct order table and hardened hash index |
+| [tests/unit/locator_book_test.cpp](tests/unit/locator_book_test.cpp) | Books with engine-issued handles and with the hardened index |
 | [tests/differential/differential_test.cpp](tests/differential/differential_test.cpp) | 20 000 random operations: map ladder vs dense ladder vs a reference model |
 | [tests/alloc/zero_alloc_test.cpp](tests/alloc/zero_alloc_test.cpp) | Separate binary with counting `operator new` and pmr default resource: zero allocations in the measured part of every workload |
 | [tests/unit/index_instrumentation_test.cpp](tests/unit/index_instrumentation_test.cpp) | Separate binary built with `EIGENBOOK_INSTRUMENT_INDEX`: index probe statistics |
 | [tests/package_consumer/](tests/package_consumer/) | CTest `package_consumer`: installs the build and builds a separate project against it with `find_package(Eigenbook)` |
 
-`ctest` runs 268 GoogleTest cases in three executables plus the `package_consumer` test. Each
+`ctest` runs 315 GoogleTest cases in three executables plus the `package_consumer` test. Each
 test is mapped to a requirement in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ---
@@ -320,7 +325,8 @@ Eigenbook/
 │   ├── core/                 types.hpp, order.hpp, reject_reason.hpp
 │   ├── book/                 order_book.hpp, price_level.hpp, price_ladder.hpp (concept)
 │   │   ├── ladder/           map_ladder.hpp, dense_ladder.hpp, hybrid_ladder.hpp
-│   │   └── locator/          hash_order_index.hpp
+│   │   └── locator/          order_locator.hpp (concept), hash_order_index.hpp,
+│   │                         hardened_hash_index.hpp, direct_order_table.hpp
 │   ├── util/                 level_bitmap.hpp, object_pool.hpp, fixed_block_resource.hpp
 │   └── platform/             tsc.hpp, cpu_info.hpp, affinity.hpp, system_info.hpp
 ├── src/                      Library targets; platform/ (portable, windows/, linux/)

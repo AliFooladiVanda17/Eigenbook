@@ -9,7 +9,10 @@
 #include <eigenbook/book/ladder/dense_ladder.hpp>
 #include <eigenbook/book/ladder/hybrid_ladder.hpp>
 #include <eigenbook/book/ladder/map_ladder.hpp>
+#include <eigenbook/book/locator/direct_order_table.hpp>
+#include <eigenbook/book/locator/hardened_hash_index.hpp>
 #include <eigenbook/book/locator/hash_order_index.hpp>
+#include <eigenbook/book/locator/order_locator.hpp>
 #include <eigenbook/book/price_ladder.hpp>
 #include <eigenbook/book/price_level.hpp>
 #include <eigenbook/core/order.hpp>
@@ -69,10 +72,13 @@ struct NoFillHandler {
 // reported synchronously through a callback, so matching never allocates; resting orders live in
 // a pool and are found through a flat order index.
 //
-// Ladder selects the price-level strategy: MapPriceLadder (sparse prices) or ArrayPriceLadder
-// (dense, bounded tick range).
-template <template <OrderSide> class Ladder>
-    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
+// Ladder selects the price-level strategy (map M0 / M1 / M2, dense array, hybrid). Locator selects
+// how cancel / modify find an order: OrderIndex (client ids, default), HardenedOrderIndex (client
+// ids, seeded hash, bounded probes) or DirectOrderTable (handles issued by the book through
+// reserveOrderId(); O(1) worst case).
+template <template <OrderSide> class Ladder, typename Locator = OrderIndex>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
 class BasicOrderBook {
 public:
     using BidLadder = Ladder<OrderSide::BUY>;
@@ -127,9 +133,28 @@ public:
 
     [[nodiscard]] bool empty() const noexcept { return index.empty(); }
 
-    // Read-only view of the order index, for diagnostics and benchmarks (cluster length, and probe
+    // Issuing locators only: reserves the id for the next addOrder (engine-assigned order
+    // reference). CAPACITY_EXCEEDED when every slot is in use. An id that is reserved but never
+    // added must be given back with releaseOrderId().
+    [[nodiscard]] std::expected<OrderId, RejectReason> reserveOrderId() noexcept
+        requires IssuingOrderLocator<Locator>
+    {
+        const std::optional<OrderId> id = index.issue();
+        if (!id) [[unlikely]] {
+            return std::unexpected(RejectReason::CAPACITY_EXCEEDED);
+        }
+        return *id;
+    }
+
+    bool releaseOrderId(const OrderId id) noexcept
+        requires IssuingOrderLocator<Locator>
+    {
+        return index.release(id);
+    }
+
+    // Read-only view of the order locator, for diagnostics and benchmarks (cluster length, probe
     // statistics in EIGENBOOK_INSTRUMENT_INDEX builds). Not part of the matching interface.
-    [[nodiscard]] const OrderIndex& orderIndex() const noexcept { return index; }
+    [[nodiscard]] const Locator& orderIndex() const noexcept { return index; }
 
 private:
     // Fills `quantity` of an incoming order against the side opposite to TakerSide; returns what
@@ -140,6 +165,26 @@ private:
     void rest(const OrderRequest& request, Quantity quantity);
 
     void removeResting(Order& order) noexcept;
+
+    // Takes a resting order out of its ladder and the pool but keeps its id valid (modify
+    // re-entry): Locator::unbind instead of erase.
+    void detachForReentry(Order& order) noexcept;
+
+    [[nodiscard]] static RejectReason rejectFor(const Admission a) noexcept {
+        switch (a) {
+            case Admission::DUPLICATE:
+                return RejectReason::DUPLICATE_ORDER_ID;
+            case Admission::NOT_ISSUED:
+                return RejectReason::INVALID_ORDER_ID;
+            case Admission::FULL:
+                return RejectReason::CAPACITY_EXCEEDED;
+            case Admission::PROBE_LIMIT:
+                return RejectReason::ORDER_ID_REJECTED;
+            case Admission::OK:
+                break;
+        }
+        return RejectReason::INVALID_ORDER_ID;
+    }
 
     [[nodiscard]] bool accepts(const OrderSide side, const Price price) const noexcept {
         return side == OrderSide::BUY ? bidLadder.accepts(price) : askLadder.accepts(price);
@@ -162,7 +207,7 @@ private:
 
     InstrumentId instrumentId;
     ObjectPool<Order> pool;
-    OrderIndex index;
+    Locator index;
     BidLadder bidLadder;
     AskLadder askLadder;
 };
@@ -181,15 +226,23 @@ using DenseOrderBook = BasicOrderBook<ArrayPriceLadder>;
 // Dense window around the touch, sparse overflow (HybridLadderConfig).
 using HybridOrderBook = BasicOrderBook<HybridPriceLadder>;
 
+// Other order locators (Phase A4). Hardened: client ids, keyed hash, bounded probes, fixed
+// capacity. Direct: engine-issued handles (reserveOrderId), O(1) worst-case cancel.
+using DenseOrderBookHardened = BasicOrderBook<ArrayPriceLadder, HardenedOrderIndex>;
+using DenseOrderBookDirect = BasicOrderBook<ArrayPriceLadder, DirectOrderTable>;
+using OrderBookM2Hardened = BasicOrderBook<MapPriceLadderM2, HardenedOrderIndex>;
+using OrderBookM2Direct = BasicOrderBook<MapPriceLadderM2, DirectOrderTable>;
+
 // ---------------------------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------------------------
 
-template <template <OrderSide> class Ladder>
-    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
-BasicOrderBook<Ladder>::BasicOrderBook(const InstrumentId iInstrument,
-                                       const LadderConfig config,
-                                       const std::size_t expectedOrders)
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+                 OrderLocator<Locator>
+BasicOrderBook<Ladder, Locator>::BasicOrderBook(const InstrumentId iInstrument,
+                                                const LadderConfig config,
+                                                const std::size_t expectedOrders)
     : instrumentId(iInstrument)
     , pool(std::clamp<std::size_t>(expectedOrders, 64, 4096))
     , index(expectedOrders)
@@ -198,15 +251,19 @@ BasicOrderBook<Ladder>::BasicOrderBook(const InstrumentId iInstrument,
     pool.reserve(expectedOrders);
 }
 
-template <template <OrderSide> class Ladder>
-    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
 template <typename OnFill>
-auto BasicOrderBook<Ladder>::addOrder(const OrderRequest& request, OnFill&& onFill) -> Result {
+auto BasicOrderBook<Ladder, Locator>::addOrder(const OrderRequest& request, OnFill&& onFill)
+    -> Result {
     if (request.quantity.isZero()) [[unlikely]] {
         return std::unexpected(RejectReason::INVALID_QUANTITY);
     }
-    if (index.contains(request.id)) [[unlikely]] {
-        return std::unexpected(RejectReason::DUPLICATE_ORDER_ID);
+    // Before any matching: the id must be storable if the order ends up resting.
+    if (const Admission admission = index.admit(request.id); admission != Admission::OK)
+        [[unlikely]] {
+        return std::unexpected(rejectFor(admission));
     }
     if (request.type == OrderType::LIMIT && !accepts(request.side, request.price)) [[unlikely]] {
         return std::unexpected(RejectReason::PRICE_OUT_OF_RANGE);
@@ -231,9 +288,11 @@ auto BasicOrderBook<Ladder>::addOrder(const OrderRequest& request, OnFill&& onFi
 
     ExecutionResult result{.filled = request.quantity - remaining};
     if (remaining.isZero()) {
+        index.abandon(request.id);
         return result;
     }
     if (request.type == OrderType::MARKET) {
+        index.abandon(request.id);
         result.cancelled = remaining;
         return result;
     }
@@ -242,9 +301,10 @@ auto BasicOrderBook<Ladder>::addOrder(const OrderRequest& request, OnFill&& onFi
     return result;
 }
 
-template <template <OrderSide> class Ladder>
-    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
-auto BasicOrderBook<Ladder>::cancelOrder(const OrderId id)
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+auto BasicOrderBook<Ladder, Locator>::cancelOrder(const OrderId id)
     -> std::expected<Quantity, RejectReason> {
     Order* order = index.find(id);
     if (order == nullptr) [[unlikely]] {
@@ -255,10 +315,12 @@ auto BasicOrderBook<Ladder>::cancelOrder(const OrderId id)
     return open;
 }
 
-template <template <OrderSide> class Ladder>
-    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
 template <typename OnFill>
-auto BasicOrderBook<Ladder>::modifyOrder(const ModifyRequest& request, OnFill&& onFill) -> Result {
+auto BasicOrderBook<Ladder, Locator>::modifyOrder(const ModifyRequest& request, OnFill&& onFill)
+    -> Result {
     Order* order = index.find(request.id);
     if (order == nullptr) [[unlikely]] {
         return std::unexpected(RejectReason::UNKNOWN_ORDER_ID);
@@ -289,18 +351,19 @@ auto BasicOrderBook<Ladder>::modifyOrder(const ModifyRequest& request, OnFill&& 
                                .price = request.price,
                                .quantity = request.quantity,
                                .timestamp = request.timestamp};
-    removeResting(*order);
+    detachForReentry(*order);
     return addOrder(reentry, std::forward<OnFill>(onFill));
 }
 
-template <template <OrderSide> class Ladder>
-    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
 template <OrderSide TakerSide, typename OnFill>
-Quantity BasicOrderBook<Ladder>::sweep(const OrderId takerId,
-                                       const OrderType type,
-                                       const Price limit,
-                                       Quantity quantity,
-                                       OnFill& onFill) {
+Quantity BasicOrderBook<Ladder, Locator>::sweep(const OrderId takerId,
+                                                const OrderType type,
+                                                const Price limit,
+                                                Quantity quantity,
+                                                OnFill& onFill) {
     auto& makers = [this]() -> auto& {
         if constexpr (TakerSide == OrderSide::BUY) {
             return askLadder;
@@ -351,9 +414,10 @@ Quantity BasicOrderBook<Ladder>::sweep(const OrderId takerId,
     return quantity;
 }
 
-template <template <OrderSide> class Ladder>
-    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
-void BasicOrderBook<Ladder>::rest(const OrderRequest& request, const Quantity quantity) {
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+void BasicOrderBook<Ladder, Locator>::rest(const OrderRequest& request, const Quantity quantity) {
     Order* order = pool.create(request.id,
                                request.side,
                                OrderType::LIMIT,
@@ -380,15 +444,29 @@ void BasicOrderBook<Ladder>::rest(const OrderRequest& request, const Quantity qu
     }
 }
 
-template <template <OrderSide> class Ladder>
-    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>>
-void BasicOrderBook<Ladder>::removeResting(Order& order) noexcept {
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+void BasicOrderBook<Ladder, Locator>::removeResting(Order& order) noexcept {
     if (order.getSide() == OrderSide::BUY) {
         bidLadder.removeOrder(order);
     } else {
         askLadder.removeOrder(order);
     }
     index.erase(order.getId());
+    pool.destroy(&order);
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+void BasicOrderBook<Ladder, Locator>::detachForReentry(Order& order) noexcept {
+    if (order.getSide() == OrderSide::BUY) {
+        bidLadder.removeOrder(order);
+    } else {
+        askLadder.removeOrder(order);
+    }
+    index.unbind(order.getId());
     pool.destroy(&order);
 }
 

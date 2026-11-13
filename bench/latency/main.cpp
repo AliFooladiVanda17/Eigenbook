@@ -2,7 +2,8 @@
 //
 //   eigenbook_latency [--workload all|w1|w2-churn|w2-drift|w3-cancel70|w3-cancel90|w4-collide|
 //                                 w4-load50|w5-burst[,...]]
-//                     [--book all|both|map,map-m1,map-m2,dense,hybrid] [--runs N] [--seed S]
+//                     [--book all|both|map,map-m1,map-m2,dense,hybrid,dense-hardened,dense-direct]
+//                     [--runs N] [--seed S]
 //                     [--measured N] [--warmup N]
 //                     [--quick] [--cpu N | --no-pin] [--realtime] [--prefault]
 //                     [--calibrate-ms N] [--hybrid-window TICKS] [--out DIR]
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -248,10 +250,12 @@ struct RunResult {
     std::uint64_t mismatches{0};
     double legacyMeanNs{0.0}; // W1 only: demo-style whole-loop mean
     std::size_t maxCluster{0};
+    std::uint64_t idRejects{0}; // hardened index: ids refused by the probe limit (whole run)
     std::uint64_t upstreamAllocations{0}; // pmr default-resource allocations, measured part
     std::uint64_t clockProbeP50{0};       // empty-timer p50 (ticks) just before the measured part
 #if defined(EIGENBOOK_INSTRUMENT_INDEX)
     OrderIndexStats indexStats;
+    bool hasIndexStats{false}; // the book's locator is an OrderIndex
 #endif
 };
 
@@ -264,10 +268,11 @@ template <typename Book>
 double legacyMean(const Workload& w) {
     // The demo's method: one steady_clock interval around the whole stream from an empty book.
     auto book = makeBook<Book>(w);
+    Runner<Book> runner(*book, w);
     std::uint32_t fills = 0;
     const auto start = std::chrono::steady_clock::now();
     for (const Op& op : w.ops) {
-        (void)runOp(*book, op, fills);
+        (void)runner.step(op, fills);
     }
     const auto elapsed = std::chrono::steady_clock::now() - start;
     return std::chrono::duration<double, std::nano>(elapsed).count() /
@@ -282,15 +287,19 @@ RunResult measure(const Workload& w, const Environment& env, const bool prefault
         platform::prefault(const_cast<Op*>(w.ops.data()), w.ops.size() * sizeof(Op));
     }
 
+    Runner<Book> runner(*book, w); // id translation for books that issue their own handles
+    constexpr bool kHashIndex = requires { book->orderIndex().maxClusterLength(); };
     std::uint32_t fills = 0;
     for (std::size_t i = 0; i < w.warmupOps; ++i) {
         fills = 0;
-        const bool ok = runOp(*book, w.ops[i], fills);
+        const bool ok = runner.step(w.ops[i], fills);
         r.mismatches += outcomeMatches(w.ops[i], ok, fills) ? 0 : 1;
     }
 #if defined(EIGENBOOK_INSTRUMENT_INDEX)
-    // Probe statistics of the measured part only.
-    book->orderIndex().resetStats();
+    // Probe statistics of the measured part only (OrderIndex books).
+    if constexpr (requires { book->orderIndex().resetStats(); }) {
+        book->orderIndex().resetStats();
+    }
 #endif
 
     const double ticksPerNs = env.tsc.ticksPerNanosecond();
@@ -302,10 +311,11 @@ RunResult measure(const Workload& w, const Environment& env, const bool prefault
         const Op& op = w.ops[i];
         fills = 0;
         if (!op.timed) {
-            const bool ok = runOp(*book, op, fills);
+            const bool ok = runner.step(op, fills);
             r.mismatches += outcomeMatches(op, ok, fills) ? 0 : 1;
             continue;
         }
+        Op effective = runner.prepare(op); // untimed: id translation
         std::uint64_t target = 0;
         if (w.paced) {
             target = base +
@@ -315,8 +325,9 @@ RunResult measure(const Workload& w, const Environment& env, const bool prefault
             }
         }
         const std::uint64_t t0 = platform::tscStart();
-        const bool ok = runOp(*book, op, fills);
+        const bool ok = runner.run(effective, fills); // issuing books: reserveOrderId + add
         const std::uint64_t t1 = platform::tscStop();
+        runner.finish(op, effective);
         r.service[static_cast<std::size_t>(op.expected)].record(t1 - t0);
         if (w.paced) {
             r.response.record(t1 - std::min(target, t0));
@@ -324,9 +335,17 @@ RunResult measure(const Workload& w, const Environment& env, const bool prefault
         r.mismatches += outcomeMatches(op, ok, fills) ? 0 : 1;
     }
     r.upstreamAllocations = upstreamCounter().allocations() - upstreamBefore;
-    r.maxCluster = book->orderIndex().maxClusterLength();
+    if constexpr (kHashIndex) {
+        r.maxCluster = book->orderIndex().maxClusterLength();
+    }
+    if constexpr (requires { book->orderIndex().probeLimitRejects(); }) {
+        r.idRejects = book->orderIndex().probeLimitRejects();
+    }
 #if defined(EIGENBOOK_INSTRUMENT_INDEX)
-    r.indexStats = book->orderIndex().stats();
+    if constexpr (requires { book->orderIndex().stats(); }) {
+        r.indexStats = book->orderIndex().stats();
+        r.hasIndexStats = true;
+    }
 #endif
     return r;
 }
@@ -352,7 +371,9 @@ std::vector<BookRunner> selectedBooks(const Options& o) {
     for (const std::string& name : o.books) {
         const auto it = std::ranges::find(all, name, &BookRunner::name);
         if (it == all.end()) {
-            usage("unknown book '" + name + "' (map, map-m1, map-m2, dense, hybrid, all, both)");
+            usage("unknown book '" + name +
+                  "' (map, map-m1, map-m2, dense, hybrid, dense-hardened, dense-direct, all, "
+                  "both)");
         }
         chosen.push_back(*it);
     }
@@ -412,6 +433,45 @@ struct Collected {
     std::string description;
 };
 
+#if defined(EIGENBOOK_INSTRUMENT_INDEX)
+// Probe statistics of every run of one workload / book, added together.
+OrderIndexStats mergedIndexStats(const Collected& c) {
+    OrderIndexStats total;
+    auto add = [](OrderIndexStats::Distribution& into, const OrderIndexStats::Distribution& d) {
+        for (std::size_t b = 0; b < OrderIndexStats::kBuckets; ++b) {
+            into.counts[b] += d.counts[b];
+        }
+        into.total += d.total;
+        into.max = std::max(into.max, d.max);
+    };
+    for (const RunResult& r : c.runs) {
+        add(total.findProbes, r.indexStats.findProbes);
+        add(total.insertProbes, r.indexStats.insertProbes);
+        add(total.eraseProbes, r.indexStats.eraseProbes);
+        add(total.eraseScan, r.indexStats.eraseScan);
+        add(total.eraseShifts, r.indexStats.eraseShifts);
+    }
+    return total;
+}
+
+// Lowest bucket floor with at least p % of the samples at or below its bucket.
+std::uint64_t distributionPercentile(const OrderIndexStats::Distribution& d, const double p) {
+    if (d.total == 0) {
+        return 0;
+    }
+    const auto rank =
+        static_cast<std::uint64_t>(std::ceil(p / 100.0 * static_cast<double>(d.total)));
+    std::uint64_t seen = 0;
+    for (std::size_t b = 0; b < OrderIndexStats::kBuckets; ++b) {
+        seen += d.counts[b];
+        if (seen >= rank) {
+            return OrderIndexStats::bucketFloor(b);
+        }
+    }
+    return d.max;
+}
+#endif
+
 void printTable(std::ostream& out, const Collected& c, const Environment& env) {
     const bool ns = env.canReportNanoseconds();
     const double scale = ns ? 1.0 / env.tsc.ticksPerNanosecond() : 1.0;
@@ -426,8 +486,8 @@ void printTable(std::ostream& out, const Collected& c, const Environment& env) {
     out << "\n"
         << c.workload << " / " << c.book << " (" << c.description << "; " << c.runs.size()
         << " runs; churn " << fmt(c.churn) << " levels/op; outcome mismatches " << mismatches
-        << "; max index cluster " << c.runs.back().maxCluster
-        << "; pmr upstream allocations per run " << upstream
+        << "; max index cluster " << c.runs.back().maxCluster << "; id rejects "
+        << c.runs.back().idRejects << "; pmr upstream allocations per run " << upstream
         << "; clock probe (empty-timer p50, ticks) per run " << probes << ")\n";
     if (c.workload == "w1") {
         std::vector<double> legacy;
@@ -482,24 +542,18 @@ void printTable(std::ostream& out, const Collected& c, const Environment& env) {
     row("response (paced)",
         [](const RunResult& r) -> const LatencyHistogram& { return r.response; });
 #if defined(EIGENBOOK_INSTRUMENT_INDEX)
-    const OrderIndexStats& s = c.runs.back().indexStats;
+    if (c.runs.empty() || !c.runs.front().hasIndexStats) {
+        return;
+    }
+    const OrderIndexStats s = mergedIndexStats(c);
     auto dist = [&](const char* name, const OrderIndexStats::Distribution& d) {
-        std::uint64_t seen = 0;
-        std::uint64_t p50 = 0;
-        std::uint64_t p99 = 0;
-        for (std::size_t b = 0; b < OrderIndexStats::kBuckets; ++b) {
-            seen += d.counts[b];
-            if (p50 == 0 && seen * 2 >= d.total && d.total > 0) {
-                p50 = OrderIndexStats::bucketFloor(b);
-            }
-            if (p99 == 0 && seen * 100 >= d.total * 99 && d.total > 0) {
-                p99 = OrderIndexStats::bucketFloor(b);
-            }
+        out << "    " << std::left << std::setw(14) << name << std::right << " n " << d.total;
+        for (const double p : {50.0, 99.0, 99.9}) {
+            out << ", p" << p << " >= " << distributionPercentile(d, p);
         }
-        out << "    " << std::left << std::setw(14) << name << std::right << " n " << d.total
-            << ", p50 >= " << p50 << ", p99 >= " << p99 << ", max " << d.max << "\n";
+        out << ", max " << d.max << "\n";
     };
-    out << "  index probes (last run, measured part; bucket floors):\n";
+    out << "  index probe lengths (all runs, measured part; bucket floors):\n";
     dist("find", s.findProbes);
     dist("insert", s.insertProbes);
     dist("erase-locate", s.eraseProbes);
@@ -577,6 +631,28 @@ void writeCsv(const fs::path& dir, const std::vector<Collected>& all, const Envi
                  [k](const RunResult& r) -> const LatencyHistogram& { return r.service[k]; });
         }
         dump("response", [](const RunResult& r) -> const LatencyHistogram& { return r.response; });
+
+#if defined(EIGENBOOK_INSTRUMENT_INDEX)
+        // Full probe / shift length distributions, all runs merged (OrderIndex books only).
+        if (!c.runs.empty() && c.runs.front().hasIndexStats) {
+            const OrderIndexStats s = mergedIndexStats(c);
+            std::ofstream probes(dir / ("index_probes_" + c.workload + "_" + c.book + ".csv"));
+            probes << "distribution,length_from,count\n";
+            auto emitDist = [&](const char* name, const OrderIndexStats::Distribution& d) {
+                for (std::size_t b = 0; b < OrderIndexStats::kBuckets; ++b) {
+                    if (d.counts[b] != 0) {
+                        probes << name << "," << OrderIndexStats::bucketFloor(b) << ","
+                               << d.counts[b] << "\n";
+                    }
+                }
+            };
+            emitDist("find", s.findProbes);
+            emitDist("insert", s.insertProbes);
+            emitDist("erase-locate", s.eraseProbes);
+            emitDist("erase-scan", s.eraseScan);
+            emitDist("erase-shift", s.eraseShifts);
+        }
+#endif
     }
 }
 

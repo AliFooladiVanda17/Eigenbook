@@ -11,6 +11,7 @@
 #include <array>
 #endif
 
+#include <eigenbook/book/locator/order_locator.hpp>
 #include <eigenbook/core/order.hpp>
 #include <eigenbook/core/types.hpp>
 
@@ -114,6 +115,11 @@ public:
 
     [[nodiscard]] bool contains(const OrderId id) const noexcept { return find(id) != nullptr; }
 
+    // OrderLocator: any id that is not resting may be added (the table grows as needed).
+    [[nodiscard]] Admission admit(const OrderId id) const noexcept {
+        return contains(id) ? Admission::DUPLICATE : Admission::OK;
+    }
+
     // Returns false (and changes nothing) when the id is already present.
     bool insert(const OrderId id, Order* order) {
         assert(order != nullptr);
@@ -167,6 +173,11 @@ public:
         --count;
         return true;
     }
+
+    // OrderLocator: client ids need no reservation, so leaving and abandoning are plain erases.
+    void unbind(const OrderId id) noexcept { erase(id); }
+
+    void abandon(OrderId) noexcept {}
 
     void reserve(const std::size_t n) {
         const std::size_t wanted = capacityFor(n);
@@ -249,6 +260,8 @@ private:
     std::size_t mask{0};
     std::size_t count{0};
 };
+
+static_assert(OrderLocator<OrderIndex>);
 
 } // namespace eigenbook
 
