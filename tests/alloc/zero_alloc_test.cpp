@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <harness/books.hpp>
 #include <harness/executor.hpp>
 #include <harness/histogram.hpp>
 #include <workloads/w1_baseline.hpp>
@@ -284,12 +285,13 @@ std::vector<Case> cases() {
 }
 
 // Known NFR-02 violations: (book, workload) pairs that currently allocate in the measured part.
-// Each one is asserted to still allocate, so fixing it (Phase A3: preallocated map-ladder node
-// resources) makes this test fail until the entry is removed, and a new violation is never
-// silently accepted.
+// Each one is asserted to still allocate, so changing that behaviour makes this test fail until
+// the entry is removed, and a new violation is never silently accepted.
 //
-// map / w2-drift: long-lived orders left behind a trending mid keep raising the number of live
-// price levels, and every new high makes the map ladder's pmr pool fetch a chunk from upstream.
+// map (M0, the default OrderBook) / w2-drift: long-lived orders left behind a trending mid keep
+// raising the number of live price levels, and every new high makes the M0 pmr pool fetch a chunk
+// from upstream. M0 is kept as it is, as the baseline; the bounded ladders (M1, M2, hybrid) do not
+// allocate.
 struct KnownViolation {
     std::string_view book;
     std::string_view workload;
@@ -326,7 +328,8 @@ void expectNoAllocationInMeasuredPart(const Workload& w,
                                      << " no longer allocates: remove it from kKnownViolations and "
                                         "update NFR-02 in docs/REQUIREMENTS.md";
         std::cout << "[ KNOWN    ] " << bookName << " / " << w.name << ": " << c.allocations
-                  << " allocations in the measured part (NFR-02 violation, fixed in A3)\n";
+                  << " allocations in the measured part (NFR-02 violation of M0; M1, M2 and hybrid "
+                     "do not allocate)\n";
     } else {
         EXPECT_EQ(c.allocations, 0u)
             << bookName << " / " << w.name << ": allocations in the measured part";
@@ -383,27 +386,33 @@ TEST(ZeroAllocation, HistogramRecordDoesNotAllocate) {
     EXPECT_EQ(c.allocations, 0u);
 }
 
-TEST(ZeroAllocation, MapBookMeasuredPartOfEveryWorkload) {
+// Every workload on one book type, built exactly as the latency benchmark builds it.
+template <typename Book>
+void everyWorkloadOn() {
     for (const Case& k : cases()) {
         const Workload w = k.make();
-        expectNoAllocationInMeasuredPart(
-            w,
-            std::make_unique<OrderBook>(InstrumentId{1}, MapLadderConfig{}, w.expectedOrders),
-            "map");
+        expectNoAllocationInMeasuredPart(w, BookTraits<Book>::make(w), BookTraits<Book>::name);
     }
 }
 
+TEST(ZeroAllocation, MapBookMeasuredPartOfEveryWorkload) {
+    everyWorkloadOn<OrderBook>();
+}
+
+TEST(ZeroAllocation, MapM1BookMeasuredPartOfEveryWorkload) {
+    everyWorkloadOn<OrderBookM1>();
+}
+
+TEST(ZeroAllocation, MapM2BookMeasuredPartOfEveryWorkload) {
+    everyWorkloadOn<OrderBookM2>();
+}
+
 TEST(ZeroAllocation, DenseBookMeasuredPartOfEveryWorkload) {
-    for (const Case& k : cases()) {
-        const Workload w = k.make();
-        expectNoAllocationInMeasuredPart(
-            w,
-            std::make_unique<DenseOrderBook>(
-                InstrumentId{1},
-                ArrayLadderConfig{.minPrice = w.minPrice, .tickCount = w.tickCount()},
-                w.expectedOrders),
-            "dense");
-    }
+    everyWorkloadOn<DenseOrderBook>();
+}
+
+TEST(ZeroAllocation, HybridBookMeasuredPartOfEveryWorkload) {
+    everyWorkloadOn<HybridOrderBook>();
 }
 
 } // namespace eigenbook::bench

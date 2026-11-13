@@ -20,10 +20,12 @@ target_sources(eigenbook_book
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/price_ladder.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/map_ladder.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/dense_ladder.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/book/ladder/hybrid_ladder.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/locator/hash_order_index.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/order_book.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/util/level_bitmap.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/util/object_pool.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/util/fixed_block_resource.hpp
 )
 
 target_compile_features(eigenbook_book INTERFACE cxx_std_23)

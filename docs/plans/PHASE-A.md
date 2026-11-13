@@ -1,6 +1,6 @@
 # Phase A: standard layout, latency harness, map-ladder tail, cancel-path tail
 
-Status: A0 done (recon); A1 done; A2 done (results provisional: unstable core clock); A3 next.
+Status: A0 done (recon); A1 done; A2 done (results provisional: unstable core clock); A3a (code + tests) done; A3b (measurements) next.
 
 ## A0 recon results
 
@@ -332,17 +332,46 @@ Deviations from the plan above, and things found while doing it:
 - `bench/micro/` not created (no Google Benchmark, see above).
 - Linux implementations (`src/platform/linux/*`) written but never compiled.
 
-## A3: map-ladder tail (outline)
+## A3: map-ladder tail
 
-Allocation policy as a template parameter of `MapPriceLadder` (M0 default pool, M1 monotonic over
-a preallocated buffer with `null_memory_resource` upstream, M2 dedicated single-size free list),
-`MapLadderConfig::maxLevels`, `RejectReason::CAPACITY_EXCEEDED` at the book boundary,
-`book/ladder/hybrid_ladder.hpp` (H1), differential test map/dense/hybrid/reference,
-`EIGENBOOK_LONG_TESTS`. Results per variant per workload with measured churn.
+Two checkpoints: **A3a** code + tests (no clock-sensitive work), **A3b** measurements (needs a
+stable core clock: AC power and a performance power plan, see A2 "As built").
 
-Risk: making exhaustion a reject requires the capacity check **before** any mutation; the same
-pre-check is what fixes the modify loss bug in B1, so A3 implements the check at the ladder
-boundary and B1 reuses it.
+### File-by-file (A3a)
+
+| File | Change |
+|---|---|
+| `core/reject_reason.hpp` | `CAPACITY_EXCEEDED` appended (existing values unchanged) |
+| `book/price_ladder.hpp` | Concept gains `canRestAt(price) noexcept -> bool`: an order at this price can rest without exceeding the ladder's capacity (its level exists, or a new level fits) |
+| `book/price_level.hpp` | `adoptFrom(PriceLevel&)`: moves a level's queue into another (empty) level and re-points each order's level pointer, O(orders); used by the hybrid ladder's recentering |
+| `util/fixed_block_resource.hpp` | **M2**: `std::pmr::memory_resource` with one preallocated, pre-faulted array of equal blocks and an intrusive free list; requests that do not fit a block go to a fallback (only the map's own bookkeeping at construction) and are counted |
+| `book/ladder/map_ladder.hpp` | `BasicMapPriceLadder<Side, NodePolicy>`; policies **M0** `MapNodesOnHeap` (today's pool, default upstream), **M1** `MapNodesOnMonotonicBuffer` (same pool over a `monotonic_buffer_resource` on a preallocated buffer, upstream `null_memory_resource()`, pool pre-warmed with `maxLevels` nodes), **M2** `MapNodesOnFixedBlocks`; node size measured at construction by recording the allocation of one probe insert; `MapLadderConfig::maxLevels` (0 = unbounded, M0 only); aliases `MapPriceLadder` (= M0, unchanged behaviour), `MapPriceLadderM1`, `MapPriceLadderM2` |
+| `book/ladder/hybrid_ladder.hpp` | **H1** `HybridPriceLadder<Side>`: ring of `windowTicks` levels (power of two) + two-level bitmap covering `[base, base + W)`; ordered overflow maps on an M2 resource for prices above / below the window; after each add, up to `maxShiftsPerOp` one-tick window shifts toward the touch, moving at most `maxMovesPerOp` levels (each move is O(orders in that level)); `maxLevels` admission like M1/M2; `checkInvariants()` for tests |
+| `book/ladder/dense_ladder.hpp` | `canRestAt` = `accepts` |
+| `book/order_book.hpp` | Limit add: `CAPACITY_EXCEEDED` **before any matching** if the own side has no level at the price and is full (conservative: a marketable limit that would fully fill is rejected too; B1's liquidity pre-check refines it). Modify re-entry: rejected, order unchanged, if the new price needs a new level that does not fit even after removing the order. Aliases `OrderBookM1`, `OrderBookM2`, `HybridOrderBook` |
+| `bench/workloads/workload.hpp` | `peakLevelsPerSide` (sizes `maxLevels`) |
+| `bench/latency/main.cpp` | `--book` takes `map`, `map-m1`, `map-m2`, `dense`, `hybrid`, `all` |
+| Tests | capacity rejects (add and modify) for every ladder; M1/M2 build and fill to exactly `maxLevels`; fixed-block resource; hybrid unit tests incl. recentering and invariants; differential test map M0/M1/M2 vs dense vs hybrid vs reference with a **drifting** mid and a small hybrid window; `EIGENBOOK_LONG_TESTS` (≥ 1,000,000 steps × several seeds); zero-allocation test for every book type |
+
+### A3b
+
+W1, W2-churn, W2-drift, W5 for M0, M1, M2, dense, H1: p50 / p99 / p99.9 / p99.99 / max with
+measured churn and per-run clock probe. Hypothesis to confirm or refute: the map tail is node
+allocation + pointer chasing + rebalancing; M1/M2 remove the first, only dense/hybrid remove all
+three.
+
+### Risks
+
+- Capacity must be checked **before** any mutation. The add check is conservative (see above);
+  the modify check computes whether removing the order frees its level.
+- `std::pmr::map` node size is implementation-defined: measured, not assumed. MSVC debug builds
+  also allocate a container proxy through the allocator; it fits a block or goes to the counted
+  fallback at construction.
+- Hybrid recentering moves levels: a level's address changes, so every order's level pointer is
+  re-pointed. The book never holds a level reference across an own-side `addOrder`, which is the
+  only place recentering runs.
+- Large price jumps: recentering slides at most `maxShiftsPerOp` ticks per add, so after a jump
+  the touch lives in the overflow map (correct, map-speed) until the window catches up.
 
 ## A4: cancel-path tail (outline)
 

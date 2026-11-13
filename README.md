@@ -42,9 +42,16 @@ owned by a single thread so that matching needs no locks.
 - **Cancel and modify through a flat order index** (open addressing, linear probing): expected
   O(1) lookup. Reducing quantity at the same price keeps time priority; any other change
   re-enters the order.
-- **Two price-ladder strategies** behind one C++20 concept (`PriceLadder`):
-  - `OrderBook`: `std::pmr::map` ladder over a pool resource, for sparse or unbounded prices.
+- **Price-ladder strategies** behind one C++20 concept (`PriceLadder`):
+  - `OrderBook`: `std::pmr::map` ladder over a pool resource (M0), for sparse or unbounded prices.
+  - `OrderBookM1`, `OrderBookM2`: the same map ladder with a level bound (`maxLevels`) and its
+    nodes preallocated (M1: pool over a preallocated arena; M2: single-size free list); no
+    allocation after construction.
   - `DenseOrderBook`: fixed array + two-level occupancy bitmap, for dense, bounded tick ranges.
+  - `HybridOrderBook`: a dense window around the touch plus ordered maps for the rest, with
+    bounded, incremental recentering; any price, no allocation after construction.
+- **Capacity is a reject:** a bounded ladder that is full returns `CAPACITY_EXCEEDED` before any
+  matching, for adds and modifies, instead of allocating.
 - **No allocation in the sweep:** fills are reported through a callback; resting orders come from
   a pre-reserved object pool.
 - **One cache line per order:** each `Order` node is exactly 64 bytes (`static_assert`).
@@ -52,19 +59,20 @@ owned by a single thread so that matching needs no locks.
 - **Rejections as values:** business rejections are returned as
   `std::expected<…, RejectReason>`.
 - **Header-only:** link `Eigenbook::book`; nothing is compiled on the consumer's behalf.
-- **Tested against a reference model:** a randomized differential test runs both ladders
-  against a deliberately naive reference book.
+- **Tested against a reference model:** randomized differential tests run every ladder against a
+  deliberately naive reference book, including a drifting-mid stream that keeps the hybrid
+  window recentering.
 
 ## Known limitations
 
 These are tracked in [docs/plans/PHASE-A.md](docs/plans/PHASE-A.md) and fixed in the phases
 named there. Until then, do not expose the book to untrusted input.
 
-- Resting an order can allocate (and throw `std::bad_alloc`) when the pool, the order index or
-  the map ladder's node pool has to grow beyond what was reserved at construction. The
-  zero-allocation test shows the map ladder doing this after warm-up whenever the number of live
-  price levels reaches a new high (workload W2-drift); the dense ladder did not allocate in any
-  workload.
+- Resting an order can allocate (and throw `std::bad_alloc`) when the order pool or the order
+  index has to grow beyond what was reserved at construction, and, for the default `OrderBook`
+  (map ladder M0), when its node pool grows. The zero-allocation test shows M0 doing this after
+  warm-up whenever the number of live price levels reaches a new high (workload W2-drift); the
+  dense, M1, M2 and hybrid books did not allocate in any workload.
 - A modify that re-enters the order removes the original first; if re-insertion throws, the
   order is lost.
 - No ownership check: any caller can cancel or modify any order id. No self-trade prevention,
@@ -262,12 +270,15 @@ ctest --preset dev-debug          # or msvc-debug, asan-ubsan, msvc-asan, ...
 | [tests/unit/histogram_test.cpp](tests/unit/histogram_test.cpp) | Benchmark histogram accuracy against an exact reference |
 | [tests/unit/workload_test.cpp](tests/unit/workload_test.cpp) | Benchmark workloads: determinism, predicted outcomes on both books |
 | [tests/unit/platform_test.cpp](tests/unit/platform_test.cpp) | CPU detection, TSC calibration, pinning, CPU choice |
+| [tests/unit/capacity_test.cpp](tests/unit/capacity_test.cpp) | `CAPACITY_EXCEEDED` for adds and modifies on every bounded book |
+| [tests/unit/hybrid_ladder_test.cpp](tests/unit/hybrid_ladder_test.cpp) | Hybrid window, overflow maps, recentering, invariants |
+| [tests/unit/fixed_block_resource_test.cpp](tests/unit/fixed_block_resource_test.cpp) | The M2 single-size block resource |
 | [tests/differential/differential_test.cpp](tests/differential/differential_test.cpp) | 20 000 random operations: map ladder vs dense ladder vs a reference model |
 | [tests/alloc/zero_alloc_test.cpp](tests/alloc/zero_alloc_test.cpp) | Separate binary with counting `operator new` and pmr default resource: zero allocations in the measured part of every workload |
 | [tests/unit/index_instrumentation_test.cpp](tests/unit/index_instrumentation_test.cpp) | Separate binary built with `EIGENBOOK_INSTRUMENT_INDEX`: index probe statistics |
 | [tests/package_consumer/](tests/package_consumer/) | CTest `package_consumer`: installs the build and builds a separate project against it with `find_package(Eigenbook)` |
 
-`ctest` runs 124 GoogleTest cases in three executables plus the `package_consumer` test. Each
+`ctest` runs 268 GoogleTest cases in three executables plus the `package_consumer` test. Each
 test is mapped to a requirement in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
 ---
@@ -308,9 +319,9 @@ Eigenbook/
 ├── include/eigenbook/        Public headers (namespace eigenbook)
 │   ├── core/                 types.hpp, order.hpp, reject_reason.hpp
 │   ├── book/                 order_book.hpp, price_level.hpp, price_ladder.hpp (concept)
-│   │   ├── ladder/           map_ladder.hpp, dense_ladder.hpp
+│   │   ├── ladder/           map_ladder.hpp, dense_ladder.hpp, hybrid_ladder.hpp
 │   │   └── locator/          hash_order_index.hpp
-│   ├── util/                 level_bitmap.hpp, object_pool.hpp
+│   ├── util/                 level_bitmap.hpp, object_pool.hpp, fixed_block_resource.hpp
 │   └── platform/             tsc.hpp, cpu_info.hpp, affinity.hpp, system_info.hpp
 ├── src/                      Library targets; platform/ (portable, windows/, linux/)
 ├── apps/demo/                Small usage example
@@ -344,7 +355,7 @@ Detailed plans live in [docs/plans/](docs/plans/).
 - [x] Standard layout, namespace, header-only target, presets, install/export
 - [x] Latency harness: TSC timer, log-linear histograms, CPU pinning, seeded workloads,
       zero-allocation test
-- [ ] Map-ladder tail: preallocated node resources, hybrid ladder
+- [ ] Map-ladder tail: preallocated node resources, hybrid ladder (implemented; measurements pending)
 - [ ] Cancel-path tail: direct order table with generation-checked handles, hardened hash index
 
 **Phase B: around the book** (one phase at a time)

@@ -19,8 +19,17 @@ protected:
     static constexpr OrderSide kSide = Ladder::side;
     static constexpr bool kBid = kSide == OrderSide::BUY;
 
-    // Default configs: the map is unbounded, the array covers [0, 65536).
-    Ladder ladder{};
+    // Default configs, except that the map ladders get a level bound (M1 / M2 need one): the array
+    // covers [0, 65536), the hybrid window [0, 4096) with maps beyond it.
+    static typename Ladder::Config config() {
+        typename Ladder::Config c{};
+        if constexpr (requires { c.maxLevels; } && !requires { c.windowTicks; }) {
+            c.maxLevels = 1 << 16;
+        }
+        return c;
+    }
+
+    Ladder ladder{config()};
 
     Order make(std::uint64_t id, std::int64_t price, std::uint64_t qty = 1) {
         return makeOrder(id, kSide, price, qty);
@@ -35,8 +44,14 @@ protected:
 
 using LadderTypes = ::testing::Types<MapPriceLadder<OrderSide::BUY>,
                                      MapPriceLadder<OrderSide::SELL>,
+                                     MapPriceLadderM1<OrderSide::BUY>,
+                                     MapPriceLadderM1<OrderSide::SELL>,
+                                     MapPriceLadderM2<OrderSide::BUY>,
+                                     MapPriceLadderM2<OrderSide::SELL>,
                                      ArrayPriceLadder<OrderSide::BUY>,
-                                     ArrayPriceLadder<OrderSide::SELL>>;
+                                     ArrayPriceLadder<OrderSide::SELL>,
+                                     HybridPriceLadder<OrderSide::BUY>,
+                                     HybridPriceLadder<OrderSide::SELL>>;
 TYPED_TEST_SUITE(PriceLadderTest, LadderTypes);
 
 } // namespace

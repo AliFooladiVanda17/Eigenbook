@@ -7,6 +7,7 @@
 #include <optional>
 
 #include <eigenbook/book/ladder/dense_ladder.hpp>
+#include <eigenbook/book/ladder/hybrid_ladder.hpp>
 #include <eigenbook/book/ladder/map_ladder.hpp>
 #include <eigenbook/book/locator/hash_order_index.hpp>
 #include <eigenbook/book/price_ladder.hpp>
@@ -144,6 +145,10 @@ private:
         return side == OrderSide::BUY ? bidLadder.accepts(price) : askLadder.accepts(price);
     }
 
+    [[nodiscard]] bool canRestAt(const OrderSide side, const Price price) const noexcept {
+        return side == OrderSide::BUY ? bidLadder.canRestAt(price) : askLadder.canRestAt(price);
+    }
+
     // A taker at `limit` can trade with a maker level at `makerPrice`.
     template <OrderSide TakerSide>
     [[nodiscard]] static constexpr bool crosses(const Price limit,
@@ -162,11 +167,19 @@ private:
     AskLadder askLadder;
 };
 
-// Sparse / unbounded prices.
+// Sparse / unbounded prices (map ladder M0: nodes from a pool over the heap).
 using OrderBook = BasicOrderBook<MapPriceLadder>;
+
+// Sparse prices, bounded number of levels (MapLadderConfig::maxLevels), no allocation after
+// construction: map ladder M1 (pool over a preallocated arena) and M2 (fixed-block free list).
+using OrderBookM1 = BasicOrderBook<MapPriceLadderM1>;
+using OrderBookM2 = BasicOrderBook<MapPriceLadderM2>;
 
 // Dense, bounded tick range.
 using DenseOrderBook = BasicOrderBook<ArrayPriceLadder>;
+
+// Dense window around the touch, sparse overflow (HybridLadderConfig).
+using HybridOrderBook = BasicOrderBook<HybridPriceLadder>;
 
 // ---------------------------------------------------------------------------------------------
 // Implementation
@@ -197,6 +210,11 @@ auto BasicOrderBook<Ladder>::addOrder(const OrderRequest& request, OnFill&& onFi
     }
     if (request.type == OrderType::LIMIT && !accepts(request.side, request.price)) [[unlikely]] {
         return std::unexpected(RejectReason::PRICE_OUT_OF_RANGE);
+    }
+    // Checked before any matching, so a full ladder is a clean reject. Conservative: a limit order
+    // that would trade in full never needs a new level, but is rejected too when its side is full.
+    if (request.type == OrderType::LIMIT && !canRestAt(request.side, request.price)) [[unlikely]] {
+        return std::unexpected(RejectReason::CAPACITY_EXCEEDED);
     }
 
     const Quantity remaining = request.side == OrderSide::BUY
@@ -257,6 +275,11 @@ auto BasicOrderBook<Ladder>::modifyOrder(const ModifyRequest& request, OnFill&& 
         }
     } else if (!accepts(order->getSide(), request.price)) [[unlikely]] {
         return std::unexpected(RejectReason::PRICE_OUT_OF_RANGE);
+    } else if (!canRestAt(order->getSide(), request.price) &&
+               PriceLevel::ownerOf(*order)->orderCount() != 1) [[unlikely]] {
+        // The new price needs a new level and the ladder is full; removing the order would not
+        // free its level either. Rejected before anything changes: the order stays as it was.
+        return std::unexpected(RejectReason::CAPACITY_EXCEEDED);
     }
 
     // Price change or size increase: the order loses priority and re-enters (it may cross).

@@ -20,7 +20,7 @@ protected:
     std::unique_ptr<Book> book = BookFactory<Book>::make();
 };
 
-using BookTypes = ::testing::Types<OrderBook, DenseOrderBook>;
+using BookTypes = AllBookTypes;
 TYPED_TEST_SUITE(OrderBookTest, BookTypes);
 
 } // namespace

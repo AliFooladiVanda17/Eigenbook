@@ -2,9 +2,10 @@
 //
 //   eigenbook_latency [--workload all|w1|w2-churn|w2-drift|w3-cancel70|w3-cancel90|w4-collide|
 //                                 w4-load50|w5-burst[,...]]
-//                     [--book both|map|dense] [--runs N] [--seed S] [--measured N] [--warmup N]
+//                     [--book all|both|map,map-m1,map-m2,dense,hybrid] [--runs N] [--seed S]
+//                     [--measured N] [--warmup N]
 //                     [--quick] [--cpu N | --no-pin] [--realtime] [--prefault]
-//                     [--calibrate-ms N] [--out DIR]
+//                     [--calibrate-ms N] [--hybrid-window TICKS] [--out DIR]
 //
 // Method (see docs/BENCHMARKS.md): pin to one P-core, raise priority, calibrate the invariant TSC
 // against steady_clock, measure the empty-timer overhead, then for every workload and run:
@@ -32,6 +33,7 @@
 #include <vector>
 
 #include <eigenbook_bench_build_info.hpp>
+#include <harness/books.hpp>
 #include <harness/environment.hpp>
 #include <harness/executor.hpp>
 #include <harness/histogram.hpp>
@@ -85,8 +87,7 @@ UpstreamCounter& upstreamCounter() {
 
 struct Options {
     std::vector<std::string> workloads{"all"};
-    bool runMap{true};
-    bool runDense{true};
+    std::vector<std::string> books{"all"};
     unsigned runs{5};
     std::uint64_t seed{1};
     std::optional<std::size_t> measured;
@@ -97,6 +98,7 @@ struct Options {
     bool realtime{false};
     bool prefault{false};
     unsigned calibrateMs{1000};
+    std::size_t hybridWindow{16384};
     fs::path out{EIGENBOOK_BENCH_RESULTS_DIR};
 };
 
@@ -130,11 +132,9 @@ Options parse(const int argc, char** argv) {
         if (a == "--workload") {
             o.workloads = split(value());
         } else if (a == "--book") {
-            const std::string b = value();
-            o.runMap = b == "both" || b == "map";
-            o.runDense = b == "both" || b == "dense";
-            if (!o.runMap && !o.runDense) {
-                usage("--book must be both, map or dense");
+            o.books = split(value());
+            if (o.books == std::vector<std::string>{"both"}) {
+                o.books = {"map", "dense"}; // the A2 pair
             }
         } else if (a == "--runs") {
             o.runs = static_cast<unsigned>(std::stoul(value()));
@@ -154,6 +154,8 @@ Options parse(const int argc, char** argv) {
             o.realtime = true;
         } else if (a == "--prefault") {
             o.prefault = true;
+        } else if (a == "--hybrid-window") {
+            o.hybridWindow = std::stoull(value());
         } else if (a == "--calibrate-ms") {
             o.calibrateMs = static_cast<unsigned>(std::stoul(value()));
         } else if (a == "--out") {
@@ -254,19 +256,8 @@ struct RunResult {
 };
 
 template <typename Book>
-std::unique_ptr<Book> makeBook(const Workload& w);
-
-template <>
-std::unique_ptr<OrderBook> makeBook<OrderBook>(const Workload& w) {
-    return std::make_unique<OrderBook>(InstrumentId{1}, MapLadderConfig{}, w.expectedOrders);
-}
-
-template <>
-std::unique_ptr<DenseOrderBook> makeBook<DenseOrderBook>(const Workload& w) {
-    return std::make_unique<DenseOrderBook>(
-        InstrumentId{1},
-        ArrayLadderConfig{.minPrice = w.minPrice, .tickCount = w.tickCount()},
-        w.expectedOrders);
+std::unique_ptr<Book> makeBook(const Workload& w) {
+    return BookTraits<Book>::make(w);
 }
 
 template <typename Book>
@@ -338,6 +329,34 @@ RunResult measure(const Workload& w, const Environment& env, const bool prefault
     r.indexStats = book->orderIndex().stats();
 #endif
     return r;
+}
+
+// --- Book registry
+// ---------------------------------------------------------------------------------
+
+struct BookRunner {
+    std::string_view name;
+    RunResult (*measure)(const Workload&, const Environment&, bool);
+    double (*legacy)(const Workload&);
+};
+
+std::vector<BookRunner> selectedBooks(const Options& o) {
+    std::vector<BookRunner> all;
+    forEachBookType([&]<typename Book>() {
+        all.push_back({BookTraits<Book>::name, &measure<Book>, &legacyMean<Book>});
+    });
+    if (std::ranges::find(o.books, "all") != o.books.end()) {
+        return all;
+    }
+    std::vector<BookRunner> chosen;
+    for (const std::string& name : o.books) {
+        const auto it = std::ranges::find(all, name, &BookRunner::name);
+        if (it == all.end()) {
+            usage("unknown book '" + name + "' (map, map-m1, map-m2, dense, hybrid, all, both)");
+        }
+        chosen.push_back(*it);
+    }
+    return chosen;
 }
 
 // --- Reporting -----------------------------------------------------------------------------------
@@ -630,8 +649,10 @@ int main(int argc, char** argv) {
     const Options opts = parse(argc, argv);
     // Before any book exists, so every map ladder pool takes the counter as its upstream.
     std::pmr::set_default_resource(&upstreamCounter());
+    bookOptions().hybridWindowTicks = opts.hybridWindow;
     Environment env = setUp(opts);
     print(std::cout, env);
+    std::cout << "Hybrid window  : " << opts.hybridWindow << " ticks (--hybrid-window)\n";
     if (!env.canReportNanoseconds()) {
         std::cout << "\nNo invariant TSC: all values below are in TSC ticks.\n";
     }
@@ -653,45 +674,35 @@ int main(int argc, char** argv) {
                           .measuredOps = opts.measured.value_or(
                               opts.quick ? std::min<std::size_t>(spec.defaultMeasured, 100'000)
                                          : spec.defaultMeasured)};
-        Collected map;
-        map.workload = spec.name;
-        map.book = "map";
-        Collected dense;
-        dense.workload = spec.name;
-        dense.book = "dense";
+        const std::vector<BookRunner> books = selectedBooks(opts);
+        std::vector<Collected> perBook(books.size());
+        for (std::size_t b = 0; b < books.size(); ++b) {
+            perBook[b].workload = spec.name;
+            perBook[b].book = std::string(books[b].name);
+        }
         for (unsigned run = 0; run < opts.runs; ++run) {
             const std::uint64_t seed = opts.seed + run;
             const Workload w = spec.make(seed, size, run);
             std::cerr << spec.name << " run " << run + 1 << "/" << opts.runs << ": " << w.ops.size()
                       << " ops (" << w.timedOps << " timed)\n";
-            // Alternate which book goes first so neither always runs on a warmer machine.
-            for (int k = 0; k < 2; ++k) {
-                const bool mapTurn = (run % 2 == 0) == (k == 0);
-                if (mapTurn && opts.runMap) {
-                    RunResult r = measure<OrderBook>(w, env, opts.prefault);
-                    if (spec.name == "w1") {
-                        r.legacyMeanNs = legacyMean<OrderBook>(w);
-                    }
-                    map.runs.push_back(std::move(r));
-                    map.seeds.push_back(w.seed);
+            // Rotate which book goes first so none always runs on a warmer (or cooler) machine.
+            for (std::size_t k = 0; k < books.size(); ++k) {
+                const std::size_t b = (run + k) % books.size();
+                RunResult r = books[b].measure(w, env, opts.prefault);
+                if (spec.name == "w1") {
+                    r.legacyMeanNs = books[b].legacy(w);
                 }
-                if (!mapTurn && opts.runDense) {
-                    RunResult r = measure<DenseOrderBook>(w, env, opts.prefault);
-                    if (spec.name == "w1") {
-                        r.legacyMeanNs = legacyMean<DenseOrderBook>(w);
-                    }
-                    dense.runs.push_back(std::move(r));
-                    dense.seeds.push_back(w.seed);
-                }
+                perBook[b].runs.push_back(std::move(r));
+                perBook[b].seeds.push_back(w.seed);
             }
-            map.churn = dense.churn = w.churnPerOp();
-            map.description = dense.description = w.description;
+            for (Collected& c : perBook) {
+                c.churn = w.churnPerOp();
+                c.description = w.description;
+            }
         }
-        for (Collected* c : {&map, &dense}) {
-            if (!c->runs.empty()) {
-                printTable(std::cout, *c, env);
-                collected.push_back(std::move(*c));
-            }
+        for (Collected& c : perBook) {
+            printTable(std::cout, c, env);
+            collected.push_back(std::move(c));
         }
         std::cout.flush();
     }

@@ -60,6 +60,7 @@ environment Phase A2 was built in.
 | FR-05 | The id of an order that has been filled or cancelled MAY be reused. | Done | `OrderBookTest.FilledOrderIdCanBeReused`, `OrderBookTest.CancelledOrderIdCanBeReused` |
 | FR-06 | With the dense ladder, a limit price outside the configured tick range MUST be rejected with `PRICE_OUT_OF_RANGE`; market orders are not range-checked. | Done | `DenseOrderBook.RejectsPricesOutsideTickRange`, `ArrayPriceLadder.AcceptsExactlyItsTickRange` |
 | FR-07 | With the map ladder, any `int64` price MUST be accepted. | Done | `OrderBook.AcceptsNegativeAndVeryLargePrices`, `MapPriceLadder.AcceptsAnyPrice` |
+| FR-08 | A limit order that would need a new price level when its side of the book is at capacity (`maxLevels` of a bounded ladder) MUST be rejected with `CAPACITY_EXCEEDED` before any matching takes place; the book MUST be unchanged. Market orders never rest and are not capacity-limited. (Conservative: a limit that would trade in full is rejected too.) | Done | `CapacityTest.NewLevelBeyondCapacityIsRejected`, `CapacityTest.RejectHappensBeforeAnyMatching`, `CapacityTest.FreedLevelCanBeReused` (map M0 with a bound, M1, M2, hybrid) |
 
 ### 2.2 Matching
 
@@ -86,6 +87,7 @@ environment Phase A2 was built in.
 | FR-23 | Reducing an order's quantity at the same price MUST keep its time priority. | Done | `OrderBookTest.ModifyDownKeepsTimePriority`, `OrderBookTest.ModifyToSameQuantityKeepsTimePriority` |
 | FR-24 | Increasing quantity or changing price MUST lose time priority; the order re-enters and MAY trade. | Done | `OrderBookTest.ModifyUpLosesTimePriority`, `OrderBookTest.ModifyPriceMovesLevelAndCanTrade`, `OrderBookTest.ModifyThatFullyFillsLeavesNoRestingOrder` |
 | FR-25 | A rejected modify MUST leave the order unchanged. | Done | `OrderBookTest.ModifyRejectsUnknownAndZero`, `DenseOrderBook.RejectsPricesOutsideTickRange` |
+| FR-26 | A modify that would need a new price level the ladder cannot provide, even after removing the order itself, MUST be rejected with `CAPACITY_EXCEEDED` and MUST leave the order unchanged (price, quantity, queue position). | Done | `CapacityTest.ModifyToNewLevelWhenFullIsRejectedAndLeavesTheOrderAlone`, `CapacityTest.ModifyOfALoneOrderToANewLevelFitsBecauseItFreesItsOwn` |
 
 ### 2.4 Market data
 
@@ -99,9 +101,11 @@ environment Phase A2 was built in.
 
 | ID | Requirement | Status | Verified by |
 |---|---|---|---|
-| FR-40 | Two interchangeable ladder strategies MUST be provided: a `std::map` ladder for sparse prices and a fixed-array + bitset ladder for dense, bounded tick ranges. | Done | `PriceLadderTest.*` (both strategies × both sides) |
-| FR-41 | Both strategies MUST produce identical fills and book state for the same input. | Done | `OrderBookDifferential.MapDenseAndReferenceAgree` |
+| FR-40 | Interchangeable ladder strategies MUST be provided behind one concept: a `std::map` ladder for sparse prices, a fixed-array + bitset ladder for dense, bounded tick ranges, and a hybrid of the two (FR-44). | Done | `PriceLadderTest.*` (both strategies × both sides) |
+| FR-41 | All strategies MUST produce identical fills and book state for the same input. | Done | `OrderBookDifferential.MapDenseAndReferenceAgree`, `OrderBookDifferential.AllLaddersAgreeUnderADriftingMid` (map M0 / M1 / M2, dense, hybrid against a reference model; 50,000 steps by default, 1,000,000 steps x 5 seeds with `EIGENBOOK_LONG_TESTS`) |
 | FR-42 | The dense ladder MUST find the next best level correctly across arbitrarily wide gaps. | Done | `DenseOrderBook.BestPriceRecoversAcrossWideGaps`, `LevelBitmap.FindNextAndPrevMatchReferenceSet` |
+| FR-43 | The map ladder MUST offer compile-time node-allocation policies: M0 (pool over the heap, unbounded by default), M1 (pool over a preallocated arena with no upstream, pre-warmed for `maxLevels`), M2 (preallocated single-size free list). All MUST behave identically; M1 and M2 MUST require `maxLevels` and MUST hold exactly `maxLevels` levels. | Done | `OrderBookTest.*` and `PriceLadderTest.*` (typed over M0, M1, M2), `OrderBookDifferential.*`, `Capacity.MapPoliciesNeedABound`, `Capacity.BoundedMapsFillToExactlyMaxLevels`, `FixedBlockResource.*` |
+| FR-44 | A hybrid ladder (dense ring window around the touch, ordered overflow maps, incremental recentering) MUST produce the same fills and book state as the other ladders for any input, MUST accept any `int64` price, and MUST move at most `maxMovesPerOp` levels per add. | Done | `HybridLadder.*`, `OrderBookTest.*` and `PriceLadderTest.*` (typed, small window), `OrderBookDifferential.AllLaddersAgreeUnderADriftingMid` |
 
 ### 2.6 Engine (planned)
 
@@ -119,7 +123,7 @@ environment Phase A2 was built in.
 | ID | Category | Requirement | Status | Verified by |
 |---|---|---|---|---|
 | NFR-01 | Performance | Cancel and modify MUST locate the order in O(1) through the order index. | Done | Design; `OrderIndex.MatchesUnorderedMapUnderChurn` |
-| NFR-02 | Performance | Matching MUST NOT allocate memory; resting orders come from a pre-reserved pool. After warm-up, no operation of a book sized for its peak load may allocate. | Partial | `ZeroAllocation.DenseBookMeasuredPartOfEveryWorkload` (0 allocations in all 8 workloads); `ZeroAllocation.MapBookMeasuredPartOfEveryWorkload` (0 in 7 workloads; **known violation: map ladder in W2-drift**, where new peaks in the number of live levels make the pmr node pool fetch from upstream; fix planned in A3); controls `ZeroAllocation.CountingAllocatorSeesAllocations`, `ZeroAllocation.MapLadderGrowthIsCounted`; `ObjectPool.RecyclesSlotsWithoutGrowing`. Beyond the reserved order count, the pool and index still grow (B1: hard limits). |
+| NFR-02 | Performance | Matching MUST NOT allocate memory; resting orders come from a pre-reserved pool. After warm-up, no operation of a book sized for its peak load may allocate. | Partial | 0 allocations in the measured part of all 8 workloads for the dense, map-M1, map-M2 and hybrid books: `ZeroAllocation.DenseBookMeasuredPartOfEveryWorkload`, `ZeroAllocation.MapM1BookMeasuredPartOfEveryWorkload`, `ZeroAllocation.MapM2BookMeasuredPartOfEveryWorkload`, `ZeroAllocation.HybridBookMeasuredPartOfEveryWorkload`. **Known violation: the default `OrderBook` (map ladder M0)** in W2-drift, where new peaks in the number of live levels make its pmr node pool fetch from upstream (`ZeroAllocation.MapBookMeasuredPartOfEveryWorkload` asserts it still does); M0 is kept unchanged as the comparison baseline. Controls `ZeroAllocation.CountingAllocatorSeesAllocations`, `ZeroAllocation.MapLadderGrowthIsCounted`; `ObjectPool.RecyclesSlotsWithoutGrowing`. Beyond the reserved order count, the order pool and index still grow (B1: hard limits). |
 | NFR-03 | Performance | An `Order` node MUST occupy exactly one 64-byte cache line. | Done | `static_assert` in `order.h`; `Order.OccupiesExactlyOneCacheLine` |
 | NFR-04 | Performance | Best bid / ask lookup MUST be O(1) for the dense ladder. | Done | Design |
 | NFR-05 | Concurrency | An order book MUST be mutated by a single thread and MUST NOT take locks on the hot path. | Done (book); Planned (engine) | Design |

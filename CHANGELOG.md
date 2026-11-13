@@ -10,6 +10,21 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- `RejectReason::CAPACITY_EXCEEDED`: a bounded ladder that cannot take a new price level rejects
+  the add (before any matching) or the modify (order unchanged) instead of allocating.
+  `PriceLadder` concept: `canRestAt(price)`.
+- Map-ladder node-allocation policies (compile-time): M0 `MapNodesOnHeap` (unchanged default),
+  M1 `MapNodesOnMonotonicBuffer`, M2 `MapNodesOnFixedBlocks`; `MapLadderConfig::maxLevels`; books
+  `OrderBookM1`, `OrderBookM2`. `FixedBlockResource` (single-size preallocated free list).
+- Hybrid ladder `HybridPriceLadder` / `HybridOrderBook`: ring window + bitmap around the touch,
+  ordered overflow maps, incremental recentering bounded per add; `PriceLevel::adoptFrom`.
+- Tests: capacity rejects for every bounded book, fixed-block resource, hybrid ladder (incl.
+  invariants and extreme prices), every typed book / ladder test over all five ladders,
+  differential test of all ladders under a drifting mid; option `EIGENBOOK_LONG_TESTS`
+  (1,000,000 steps × 5 seeds). Zero-allocation test for every book type. Requirements FR-08,
+  FR-26, FR-43, FR-44; ADR 0003.
+- `eigenbook_latency --book map,map-m1,map-m2,dense,hybrid|all|both`, `--hybrid-window`.
+
 - `Eigenbook::platform` (static library, Windows and Linux implementations): serialised TSC
   reads and calibration, CPUID identification (invariant TSC, hybrid core type), thread pinning
   and priority, CPU enumeration and benchmark-CPU choice, OS / power-policy facts, pre-faulting.

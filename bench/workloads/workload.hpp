@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -66,6 +67,8 @@ struct Workload {
     std::size_t timedOps{0};       // number of ops with timed == true
     std::size_t expectedOrders{0}; // book sizing (pool + index), >= peak live orders
     std::size_t peakLive{0};
+    std::size_t peakLevelsPerSide{0}; // most price levels on one side at any time
+    Price referencePrice{0};          // price of the first add (a hybrid window starts there)
     Price minPrice{0};
     Price maxPrice{0};
     bool paced{false}; // honour Op::scheduledNs (open loop)
@@ -232,6 +235,7 @@ public:
             levelsDestroyed += levelsBefore + made - levelsAfter;
         }
         peakLive = std::max(peakLive, book.orderCount());
+        peakLevels = std::max({peakLevels, book.bids().levelCount(), book.asks().levelCount()});
         out.push_back(op);
     }
 
@@ -248,6 +252,8 @@ public:
     // Copies the generation statistics into the workload and finalises its sizing fields.
     void finish(Workload& w) const {
         w.peakLive = peakLive;
+        w.peakLevelsPerSide = peakLevels;
+        w.referencePrice = firstPrice.value_or(Price{0});
         // Slack so the measured book never grows its pool or index.
         w.expectedOrders = std::max<std::size_t>(w.expectedOrders, peakLive + peakLive / 8 + 64);
         w.levelsCreated = levelsCreated;
@@ -283,6 +289,9 @@ private:
     }
 
     void trackPrice(const Price p) {
+        if (!firstPrice) {
+            firstPrice = p;
+        }
         minSeen = std::min(minSeen, p);
         maxSeen = std::max(maxSeen, p);
     }
@@ -293,6 +302,8 @@ private:
     std::size_t peakLive{0};
     std::uint64_t levelsCreated{0};
     std::uint64_t levelsDestroyed{0};
+    std::size_t peakLevels{0};
+    std::optional<Price> firstPrice;
     Price minSeen{std::numeric_limits<std::int64_t>::max()};
     Price maxSeen{std::numeric_limits<std::int64_t>::min()};
 };

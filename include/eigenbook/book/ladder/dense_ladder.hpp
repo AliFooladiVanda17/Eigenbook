@@ -57,6 +57,9 @@ public:
         return static_cast<std::uint64_t>(price - minPrice) < tickCount;
     }
 
+    // Every tick in range has a preallocated level, so capacity is the range itself.
+    [[nodiscard]] bool canRestAt(const Price price) const noexcept { return accepts(price); }
+
     // Precondition: accepts(order.getPrice()).
     void addOrder(Order& order) noexcept {
         assert(accepts(order.getPrice()));

@@ -33,13 +33,19 @@ struct SideTraits<OrderSide::SELL> {
     }
 };
 
-// What OrderBook needs from one side of the book. Both strategies from the README satisfy it.
+// What OrderBook needs from one side of the book. Every ladder strategy satisfies it.
+//
+// accepts(p):    p is inside the ladder's price range (only the dense ladder has one).
+// canRestAt(p):  an order at p can rest without exceeding the ladder's capacity: accepts(p), and
+//                either a level at p exists or a new level still fits. The book checks it before
+//                any mutation, so a full ladder is a reject, never an allocation.
 template <typename L>
 concept PriceLadder =
     requires(L ladder, const L cladder, Order& order, PriceLevel& level, Price p) {
         typename L::Config;
         { L::side } -> std::convertible_to<OrderSide>;
         { cladder.accepts(p) } noexcept -> std::same_as<bool>;
+        { cladder.canRestAt(p) } noexcept -> std::same_as<bool>;
         ladder.addOrder(order);
         { ladder.removeOrder(order) } noexcept;
         { ladder.removeLevel(level) } noexcept;

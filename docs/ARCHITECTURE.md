@@ -33,12 +33,40 @@ machine over that log (Phase B3).
 | Order node | `Order`, exactly 64 bytes, `alignas(64)`; also the intrusive list node | `core/order.hpp` |
 | Order index | `OrderId → Order*`, open addressing, linear probing, power-of-two table, load ≤ 1/2, backward-shift deletion, splitmix64 finalizer as hash | `book/locator/hash_order_index.hpp` |
 | Price level | Intrusive doubly linked FIFO list plus aggregate quantity and count | `book/price_level.hpp` |
-| Price ladder (sparse) | `std::pmr::map<Price, PriceLevel>` over an `unsynchronized_pool_resource` | `book/ladder/map_ladder.hpp` |
+| Price ladder (sparse) | `std::pmr::map<Price, PriceLevel>`; node memory by compile-time policy: M0 `unsynchronized_pool_resource` over the heap, M1 the same pool over a preallocated arena with no upstream, M2 a preallocated single-size free list | `book/ladder/map_ladder.hpp`, `util/fixed_block_resource.hpp` |
 | Price ladder (dense) | One preallocated `PriceLevel` per tick + two-level occupancy bitmap + cached best index | `book/ladder/dense_ladder.hpp`, `util/level_bitmap.hpp` |
+| Price ladder (hybrid) | Ring window of preallocated levels + bitmap around the touch; ordered overflow maps (fixed-block nodes) above and below; incremental recentering | `book/ladder/hybrid_ladder.hpp` |
 
-Both ladders satisfy the `PriceLadder` concept (`book/price_ladder.hpp`), so the book is one
-template over the ladder. `OrderBook = BasicOrderBook<MapPriceLadder>`,
-`DenseOrderBook = BasicOrderBook<ArrayPriceLadder>`.
+Every ladder satisfies the `PriceLadder` concept (`book/price_ladder.hpp`), so the book is one
+template over the ladder:
+
+| Book | Ladder | Capacity |
+|---|---|---|
+| `OrderBook` | `MapPriceLadder` (M0) | unbounded by default (`maxLevels` = 0) |
+| `OrderBookM1` | `MapPriceLadderM1` | `maxLevels` per side, preallocated |
+| `OrderBookM2` | `MapPriceLadderM2` | `maxLevels` per side, preallocated |
+| `DenseOrderBook` | `ArrayPriceLadder` | the configured tick range |
+| `HybridOrderBook` | `HybridPriceLadder` | `maxLevels` per side (window + maps), preallocated |
+
+A bounded ladder that cannot take a new level reports `canRestAt(price) == false`; the book turns
+that into `CAPACITY_EXCEEDED` **before** any matching (add) or any change (modify). See
+[ADR 0003](adr/0003-bounded-ladders-and-capacity-rejects.md).
+
+### Hybrid ladder
+
+- **Window**: `windowTicks` (power of two) levels covering `[base, base + windowTicks)`, slot
+  `price & (windowTicks − 1)`, occupancy in a two-level bitmap. Inside it, every operation costs
+  what it costs in the dense ladder.
+- **Overflow**: prices above the window in one ordered map, below it in another, both ordered by
+  the side's priority, so `begin()` is each map's best. Best level = better-side map's best, else
+  the window's best, else the worse-side map's best.
+- **Recentering**: after each add, if the touch has left the middle half of the window, the
+  window slides towards it one tick at a time, at most `maxShiftsPerOp` ticks and at most
+  `maxMovesPerOp` level moves per add. A one-tick shift evicts the level at the leaving edge (if
+  any) into a map and imports the level at the entering edge (if a map holds it). Moving a level
+  re-points each of its orders' level pointers (`PriceLevel::adoptFrom`, O(orders)).
+- **Large jumps**: the touch is served from a map (map speed, same results) until the window has
+  caught up.
 
 ### Order node layout
 
@@ -86,18 +114,21 @@ T = ticks between the old best and the next non-empty level (dense ladder).
 | Modify: price change or increase | Cancel + add | same |
 | Sweep | O(K + L), each emptied best level erased in O(1) amortised | O(K + L) plus one bitmap scan per emptied level |
 
-The map ladder's header comment currently states that adding at an existing price is O(1)
-amortised; it is O(log P). It is corrected when the map ladder is reworked in Phase A3.
+M1 and M2 have the map ladder's complexity. The hybrid ladder has the dense ladder's complexity
+for prices inside its window and the map ladder's outside it, plus, per add, at most
+`maxShiftsPerOp` window shifts and `maxMovesPerOp` level moves (each O(orders at that level)).
 
 ### Price ladder choice
 
-| | Dense (array + bitmap) | Map |
-|---|---|---|
-| Best for | Dense, bounded tick ranges | Sparse or unbounded prices |
-| Memory | Proportional to the tick range | Proportional to the number of live levels |
-| Out-of-range prices | Rejected (`PRICE_OUT_OF_RANGE`) | Accepted |
+| | Dense (array + bitmap) | Map (M0 / M1 / M2) | Hybrid |
+|---|---|---|---|
+| Best for | Dense, bounded tick ranges | Sparse or unbounded prices | Unbounded prices, activity concentrated near the touch |
+| Memory | Proportional to the tick range | M0: live levels; M1 / M2: `maxLevels`, preallocated | `windowTicks` + `maxLevels`, preallocated |
+| Out-of-range prices | Rejected (`PRICE_OUT_OF_RANGE`) | Accepted | Accepted |
+| Allocation after construction | none | M0: when live levels reach a new high; M1 / M2: none | none |
 
-A hybrid ladder (dense window around the touch, sparse overflow) is planned in Phase A3.
+Which one has the best tail latency for which workload is measured in Phase A3b
+([BENCHMARKS.md](BENCHMARKS.md)).
 
 ## Build structure
 

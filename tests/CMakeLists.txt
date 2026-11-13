@@ -12,10 +12,17 @@ add_executable(eigenbook_tests
         unit/histogram_test.cpp
         unit/workload_test.cpp
         unit/platform_test.cpp
+        unit/capacity_test.cpp
+        unit/fixed_block_resource_test.cpp
+        unit/hybrid_ladder_test.cpp
         differential/differential_test.cpp
 )
 
 target_include_directories(eigenbook_tests PRIVATE support)
+if (EIGENBOOK_LONG_TESTS)
+    # Long differential runs (1,000,000 steps x 5 seeds): minutes, not seconds.
+    target_compile_definitions(eigenbook_tests PRIVATE EIGENBOOK_LONG_TESTS)
+endif ()
 
 target_link_libraries(eigenbook_tests
         PRIVATE

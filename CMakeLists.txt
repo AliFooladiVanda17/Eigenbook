@@ -19,6 +19,7 @@ option(EIGENBOOK_BUILD_APPS "Build the example applications in apps/" ${PROJECT_
 option(EIGENBOOK_BUILD_BENCH "Build the benchmarks in bench/" ${PROJECT_IS_TOP_LEVEL})
 option(EIGENBOOK_INSTALL "Generate install and package export rules" ${PROJECT_IS_TOP_LEVEL})
 option(EIGENBOOK_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(EIGENBOOK_LONG_TESTS "Run the long randomised differential tests" OFF)
 set(EIGENBOOK_SANITIZE "" CACHE STRING
     "Sanitizers for every target in this build: address;undefined, or thread (empty = none)")
 

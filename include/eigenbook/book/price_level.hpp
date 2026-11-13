@@ -106,10 +106,29 @@ public:
         }
     }
 
+    // Takes over the whole queue of `source` (same price, this level empty) and leaves `source`
+    // empty. O(orders): every order's level pointer is re-pointed. Time priority is unchanged.
+    void adoptFrom(PriceLevel& source) noexcept {
+        assert(empty() && source.levelPrice == levelPrice && &source != this);
+        head = source.head;
+        tail = source.tail;
+        count = source.count;
+        totalQuantity = source.totalQuantity;
+        for (Order* it = head; it != nullptr; it = it->next) {
+            it->level = this;
+        }
+        source.head = source.tail = nullptr;
+        source.count = 0;
+        source.totalQuantity = Quantity{0};
+    }
+
 private:
-    // The dense ladder allocates its levels as one array and assigns their prices afterwards.
+    // The dense and hybrid ladders allocate their levels as one array and assign their prices
+    // afterwards.
     template <OrderSide>
     friend class ArrayPriceLadder;
+    template <OrderSide>
+    friend class HybridPriceLadder;
 
     Price levelPrice{0};
     Quantity totalQuantity{0};

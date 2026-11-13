@@ -1,9 +1,11 @@
 //
-// Randomised differential test: map ladder vs dense ladder vs a naive reference book.
+// Randomised differential test: every ladder (map M0 / M1 / M2, dense, hybrid) against a naive
+// reference book. EIGENBOOK_LONG_TESTS raises the drift test to 1,000,000 steps x 5 seeds.
 //
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <random>
 #include <utility>
 #include <vector>
@@ -112,9 +114,11 @@ bool sameFills(const std::vector<Fill>& a, const std::vector<Fill>& b) {
     });
 }
 
+using Depth = std::vector<std::pair<std::int64_t, std::uint64_t>>;
+
 template <typename Book>
-std::vector<std::pair<std::int64_t, std::uint64_t>> depth(const Book& book, OrderSide side) {
-    std::vector<std::pair<std::int64_t, std::uint64_t>> out;
+Depth depth(const Book& book, OrderSide side) {
+    Depth out;
     auto collect = [&](const PriceLevel& l) {
         out.emplace_back(l.price().value, l.quantity().value);
     };
@@ -122,66 +126,184 @@ std::vector<std::pair<std::int64_t, std::uint64_t>> depth(const Book& book, Orde
     return out;
 }
 
-} // namespace
+// Aggregated levels of the reference book, best to worst.
+Depth depth(const ReferenceBook& ref, OrderSide side) {
+    std::map<std::int64_t, std::uint64_t> levels;
+    for (const auto& r : ref.orders) {
+        if (r.side == side) {
+            levels[r.price] += r.qty;
+        }
+    }
+    Depth out(levels.begin(), levels.end());
+    if (side == OrderSide::BUY) {
+        std::ranges::reverse(out);
+    }
+    return out;
+}
 
-TEST(OrderBookDifferential, MapDenseAndReferenceAgree) {
-    OrderBook mapBook(kInstrument, {}, 16);
-    DenseOrderBook denseBook(kInstrument, {.minPrice = {900}, .tickCount = 200}, 16);
+// One book of every ladder type, all fed the same stream.
+struct Books {
+    OrderBook m0;
+    OrderBookM1 m1;
+    OrderBookM2 m2;
+    DenseOrderBook dense;
+    HybridOrderBook hybrid;
+
+    Books(const Price denseMin, const std::size_t denseTicks, const Price hybridBase)
+        : m0(kInstrument, {}, 16)
+        , m1(kInstrument, {.maxLevels = 1 << 16}, 16)
+        , m2(kInstrument, {.maxLevels = 1 << 16}, 16)
+        , dense(kInstrument, {.minPrice = denseMin, .tickCount = denseTicks}, 16)
+        // A small window, so the stream keeps moving levels between window and maps.
+        , hybrid(kInstrument,
+                 {.windowTicks = 64,
+                  .initialBase = hybridBase,
+                  .maxLevels = 1 << 16,
+                  .maxShiftsPerOp = 16,
+                  .maxMovesPerOp = 4},
+                 16) {}
+
+    template <typename F>
+    void each(F&& f) {
+        f("map-m0", m0);
+        f("map-m1", m1);
+        f("map-m2", m2);
+        f("dense", dense);
+        f("hybrid", hybrid);
+    }
+};
+
+// Random adds (1 in 12 market), cancels and modifies; `price()` draws a limit price. After every
+// step every book must report the reference's fills, order count and best prices; every
+// `depthEvery` steps also the full depth and the hybrid ladder's invariants.
+template <typename PriceFn, typename StepFn>
+void runDifferential(Books& books,
+                     const std::uint64_t seed,
+                     const int steps,
+                     PriceFn&& price,
+                     StepFn&& onStep,
+                     const int depthEvery = 64) {
     ReferenceBook reference;
-
-    std::mt19937_64 rng(3);
+    std::mt19937_64 rng(seed);
     std::uint64_t nextId = 1;
-    for (int step = 0; step < 20'000; ++step) {
+    for (int step = 0; step < steps; ++step) {
+        onStep(rng);
         const auto op = rng() % 10;
-        FillLog mapFills, denseFills;
         std::vector<Fill> refFills;
+        std::vector<FillLog> logs(5);
+        std::size_t k = 0;
 
         if (op < 6 || reference.orders.empty()) {
             const std::uint64_t id = nextId++;
             const OrderSide side = rng() % 2 ? OrderSide::BUY : OrderSide::SELL;
             const OrderType type = rng() % 12 == 0 ? OrderType::MARKET : OrderType::LIMIT;
-            const std::int64_t price = 980 + static_cast<std::int64_t>(rng() % 41);
+            const std::int64_t p = price(rng);
             const std::uint64_t qty = 1 + rng() % 50;
-            const OrderRequest request{{id}, side, type, {price}, {qty}, {id}};
-            const auto a = mapBook.addOrder(request, mapFills);
-            const auto b = denseBook.addOrder(request, denseFills);
-            ASSERT_TRUE(a && b);
-            ASSERT_EQ(a->filled, b->filled);
-            ASSERT_EQ(a->resting, b->resting);
-            ASSERT_EQ(a->cancelled, b->cancelled);
-            ASSERT_EQ((a->filled + a->resting + a->cancelled), Quantity{qty});
-            refFills = reference.add(id, side, type, price, qty);
+            const OrderRequest request{{id}, side, type, {p}, {qty}, {id}};
+            refFills = reference.add(id, side, type, p, qty);
+            books.each([&](const char* name, auto& book) {
+                const auto r = book.addOrder(request, logs[k++]);
+                ASSERT_TRUE(r) << name << " step " << step;
+                ASSERT_EQ((r->filled + r->resting + r->cancelled), Quantity{qty}) << name;
+            });
         } else {
-            const auto& victim = reference.orders[rng() % reference.orders.size()];
-            const std::uint64_t id = victim.id;
+            const auto victim = reference.orders[rng() % reference.orders.size()];
             if (op < 8) {
-                ASSERT_TRUE(mapBook.cancelOrder({id}));
-                ASSERT_TRUE(denseBook.cancelOrder({id}));
-                ASSERT_TRUE(reference.cancel(id));
+                ASSERT_TRUE(reference.cancel(victim.id));
+                books.each([&](const char* name, auto& book) {
+                    ASSERT_TRUE(book.cancelOrder({victim.id})) << name << " step " << step;
+                });
             } else {
-                const std::int64_t price = rng() % 2 ? victim.price
-                                                     : 980 + static_cast<std::int64_t>(rng() % 41);
+                const std::int64_t p = rng() % 2 ? victim.price : price(rng);
                 const std::uint64_t qty = 1 + rng() % 60;
-                const ModifyRequest request{{id}, {price}, {qty}, {nextId}};
-                ASSERT_TRUE(mapBook.modifyOrder(request, mapFills));
-                ASSERT_TRUE(denseBook.modifyOrder(request, denseFills));
-                refFills = reference.modify(id, price, qty);
+                const ModifyRequest request{{victim.id}, {p}, {qty}, {nextId}};
+                refFills = reference.modify(victim.id, p, qty);
+                books.each([&](const char* name, auto& book) {
+                    ASSERT_TRUE(book.modifyOrder(request, logs[k++])) << name << " step " << step;
+                });
             }
         }
+        if (::testing::Test::HasFatalFailure()) {
+            return;
+        }
 
-        ASSERT_TRUE(sameFills(mapFills.fills, refFills)) << "step " << step;
-        ASSERT_TRUE(sameFills(denseFills.fills, refFills)) << "step " << step;
-        ASSERT_EQ(mapBook.orderCount(), reference.orders.size());
-        ASSERT_EQ(denseBook.orderCount(), reference.orders.size());
-        ASSERT_EQ(mapBook.bestBid(), denseBook.bestBid());
-        ASSERT_EQ(mapBook.bestAsk(), denseBook.bestAsk());
-        if (step % 64 == 0) {
-            ASSERT_EQ(depth(mapBook, OrderSide::BUY), depth(denseBook, OrderSide::BUY));
-            ASSERT_EQ(depth(mapBook, OrderSide::SELL), depth(denseBook, OrderSide::SELL));
+        k = 0;
+        const bool checkDepth = step % depthEvery == 0;
+        const Depth refBids = checkDepth ? depth(reference, OrderSide::BUY) : Depth{};
+        const Depth refAsks = checkDepth ? depth(reference, OrderSide::SELL) : Depth{};
+        books.each([&](const char* name, auto& book) {
+            const FillLog& log = logs[k++];
+            ASSERT_TRUE(sameFills(log.fills, refFills)) << name << " step " << step;
+            ASSERT_EQ(book.orderCount(), reference.orders.size()) << name << " step " << step;
+            if (checkDepth) {
+                ASSERT_EQ(depth(book, OrderSide::BUY), refBids) << name << " step " << step;
+                ASSERT_EQ(depth(book, OrderSide::SELL), refAsks) << name << " step " << step;
+            }
+            if (book.bestBid() && book.bestAsk()) {
+                ASSERT_LT(*book.bestBid(), *book.bestAsk())
+                    << name << " left crossed at step " << step;
+            }
+        });
+        ASSERT_EQ(books.hybrid.bestBid(), books.m0.bestBid()) << "step " << step;
+        ASSERT_EQ(books.hybrid.bestAsk(), books.m0.bestAsk()) << "step " << step;
+        if (checkDepth) {
+            ASSERT_TRUE(books.hybrid.bids().checkInvariants()) << "step " << step;
+            ASSERT_TRUE(books.hybrid.asks().checkInvariants()) << "step " << step;
         }
-        if (mapBook.bestBid() && mapBook.bestAsk()) {
-            ASSERT_LT(*mapBook.bestBid(), *mapBook.bestAsk()) << "book left crossed";
+        if (::testing::Test::HasFatalFailure()) {
+            return;
         }
+    }
+}
+
+#if defined(EIGENBOOK_LONG_TESTS)
+constexpr int kLongSteps = 1'000'000;
+constexpr std::uint64_t kLongSeeds = 5;
+#else
+constexpr int kLongSteps = 50'000;
+constexpr std::uint64_t kLongSeeds = 1;
+#endif
+
+} // namespace
+
+// Prices in a narrow static band. (Name kept for requirement traceability; it now runs every
+// ladder.)
+TEST(OrderBookDifferential, MapDenseAndReferenceAgree) {
+    Books books({900}, 200, {0});
+    runDifferential(
+        books,
+        3,
+        20'000,
+        [](std::mt19937_64& rng) { return 980 + static_cast<std::int64_t>(rng() % 41); },
+        [](std::mt19937_64&) {});
+}
+
+// A mid that random-walks with occasional jumps of +-500 ticks: the hybrid window keeps
+// recentering, evicting and importing levels; every ladder must still agree with the reference.
+TEST(OrderBookDifferential, AllLaddersAgreeUnderADriftingMid) {
+    for (std::uint64_t seed = 1; seed <= kLongSeeds; ++seed) {
+        Books books({0}, 1 << 20, {500'000});
+        std::int64_t mid = 500'000;
+        runDifferential(
+            books,
+            seed,
+            kLongSteps,
+            [&mid](std::mt19937_64& rng) {
+                return mid - 20 + static_cast<std::int64_t>(rng() % 41);
+            },
+            [&mid](std::mt19937_64& rng) {
+                const auto r = rng() % 1000;
+                if (r == 0) {
+                    mid += rng() % 2 ? 500 : -500;
+                } else if (r < 300) {
+                    mid += rng() % 2 ? 1 : -1;
+                }
+                mid = std::clamp<std::int64_t>(mid, 1'000, (1 << 20) - 1'000);
+            },
+            256);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure()) << "seed " << seed;
+        EXPECT_GT(books.hybrid.bids().levelsMoved() + books.hybrid.asks().levelsMoved(), 0u)
+            << "seed " << seed;
     }
 }
 
