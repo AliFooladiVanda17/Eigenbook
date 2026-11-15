@@ -34,6 +34,12 @@ struct BookLimits {
     // price; their protection is Phase B6.
     std::uint64_t maxNotional{std::numeric_limits<std::uint64_t>::max()};
 
+    // Run the full invariant check after every auditEvery-th accepted mutation (add, modify,
+    // cancel) and halt the book (HaltReason::AUDIT_FAILED) if it fails. 0: never. The check is
+    // O(orders) (dense ladder: O(ticks + orders)), so this is for soak tests and debugging, not
+    // for a production hot path.
+    std::uint32_t auditEvery{0};
+
     [[nodiscard]] constexpr std::size_t orderCapacity() const noexcept {
         return maxOrders != 0 ? maxOrders : reserveOrders;
     }

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <random>
 #include <unordered_map>
 #include <utility>
@@ -196,6 +197,9 @@ Depth depth(const ReferenceBook& ref, OrderSide side) {
     return out;
 }
 
+// Steps between two full book audits (checkInvariants) in the differential runs.
+constexpr int kFullAuditEvery = 4096;
+
 // One book of every ladder type, all fed the same stream.
 struct Books {
     OrderBook m0;
@@ -320,6 +324,11 @@ void runDifferential(Books& books,
             if (checkDepth) {
                 ASSERT_EQ(depth(book, OrderSide::BUY), refBids) << name << " step " << step;
                 ASSERT_EQ(depth(book, OrderSide::SELL), refAsks) << name << " step " << step;
+            }
+            // The full book audit walks every tick of a dense ladder (2^20 here), so it runs far
+            // less often than the depth comparison.
+            if (step % kFullAuditEvery == 0) {
+                ASSERT_EQ(book.checkInvariants(), std::nullopt) << name << " step " << step;
             }
             if (book.bestBid() && book.bestAsk()) {
                 ASSERT_LT(*book.bestBid(), *book.bestAsk())
@@ -481,6 +490,9 @@ TEST(OrderBookDifferential, DirectHandlesAgreeWithTheReference) {
             }
             ASSERT_EQ(book.orderCount(), reference.orders.size()) << step;
             ASSERT_EQ(toHandle.size(), reference.orders.size()) << step;
+            if (step % kFullAuditEvery == 0) {
+                ASSERT_EQ(book.checkInvariants(), std::nullopt) << step;
+            }
             if (step % 256 == 0) {
                 ASSERT_EQ(depth(book, OrderSide::BUY), depth(reference, OrderSide::BUY)) << step;
                 ASSERT_EQ(depth(book, OrderSide::SELL), depth(reference, OrderSide::SELL)) << step;

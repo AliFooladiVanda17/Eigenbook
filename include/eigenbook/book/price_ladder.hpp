@@ -55,6 +55,8 @@ concept PriceLadder =
         { cladder.findLevel(p) } noexcept -> std::same_as<const PriceLevel*>;
         { cladder.levelCount() } noexcept -> std::same_as<std::size_t>;
         { cladder.empty() } noexcept -> std::same_as<bool>;
+        // Audit, cold path: the ladder's own structure and every queue in it are consistent.
+        { cladder.checkInvariants() } noexcept -> std::same_as<bool>;
     };
 
 } // namespace eigenbook

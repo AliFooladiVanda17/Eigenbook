@@ -20,6 +20,7 @@ add_executable(eigenbook_tests
         unit/limits_test.cpp
         unit/participant_test.cpp
         unit/time_in_force_test.cpp
+        unit/invariants_test.cpp
         differential/differential_test.cpp
 )
 

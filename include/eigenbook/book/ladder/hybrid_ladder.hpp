@@ -487,17 +487,7 @@ private:
     }
 
     [[nodiscard]] static bool queueConsistent(const PriceLevel& level) noexcept {
-        std::uint32_t n = 0;
-        Quantity sum{0};
-        for (const Order* o = level.front(); o != nullptr; o = o->nextInLevel()) {
-            if (o->getPrice() != level.price() ||
-                PriceLevel::ownerOf(const_cast<Order&>(*o)) != &level) {
-                return false;
-            }
-            ++n;
-            sum += o->getQuantity();
-        }
-        return n == level.orderCount() && sum == level.quantity();
+        return level.checkInvariants();
     }
 
     std::size_t width;

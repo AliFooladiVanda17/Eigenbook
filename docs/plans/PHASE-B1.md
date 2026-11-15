@@ -73,6 +73,20 @@ violation halts the book: every further request is rejected with `INSTRUMENT_HAL
 "cycle budget" of the brief is expressed as the sampling interval (a full check costs
 O(orders + levels)); an incremental checker is left for later and noted.
 
+As built, where it differs from the paragraph above:
+
+- `auditEvery` defaults to 0 in every build. Defaulting to 1 without `NDEBUG` would make debug and
+  release books behave differently (only one of them halts on a corrupt state) and would make
+  every debug run O(n²); the differential tests call the full check every 4,096 steps instead.
+- A halt does not reject every request: cancels still work, as on a real venue, so members can
+  pull their orders. A failed audit is the only halt that `resume()` refuses.
+- `checkInvariants()` returns the first `InvariantViolation` (or nothing) instead of a bool, and is
+  `noexcept` and read-only; `audit()` is the call that halts.
+- The dense ladder's check walks every tick, O(ticks + orders), not O(orders + levels).
+- Corruption for the tests is simulated with public `PriceLevel` operations applied behind the
+  book's back (`const_cast`); the checker also runs over long random histories in the
+  differential tests, where it must find nothing.
+
 ## Risks
 
 - API growth of the request structs: new fields go last with defaults, so existing designated

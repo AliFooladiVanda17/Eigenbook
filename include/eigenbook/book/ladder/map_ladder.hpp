@@ -274,6 +274,17 @@ public:
 
     [[nodiscard]] const NodePolicy& nodePolicy() const noexcept { return nodes; }
 
+    // Audit (cold path, O(orders)): every level is non-empty, keyed by its own price and
+    // consistent (PriceLevel::checkInvariants); the level count respects maxLevels.
+    [[nodiscard]] bool checkInvariants() const noexcept {
+        for (const auto& [price, level] : levels) {
+            if (level.empty() || level.price() != price || !level.checkInvariants()) {
+                return false;
+            }
+        }
+        return maxLevels == 0 || levels.size() <= maxLevels;
+    }
+
 private:
     std::size_t maxLevels;
     NodePolicy nodes; // before `levels`: the map keeps a pointer to its resource

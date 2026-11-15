@@ -162,6 +162,28 @@ public:
         return minPrice + static_cast<std::int64_t>(tickCount - 1);
     }
 
+    // Audit (cold path, O(tickCount + orders)): every level has its tick's price, the occupancy
+    // bitmap marks exactly the non-empty levels, the active count and the cached best index are
+    // right, and every queue is consistent (PriceLevel::checkInvariants).
+    [[nodiscard]] bool checkInvariants() const noexcept {
+        std::size_t active = 0;
+        std::size_t expectedBest = LevelBitmap::npos;
+        for (std::size_t i = 0; i < tickCount; ++i) {
+            const PriceLevel& level = levels[i];
+            if (level.price() != minPrice + static_cast<std::int64_t>(i) ||
+                occupied.test(i) == level.empty() || !level.checkInvariants()) {
+                return false;
+            }
+            if (!level.empty()) {
+                ++active;
+                if (expectedBest == LevelBitmap::npos || isBetterIndex(i, expectedBest)) {
+                    expectedBest = i;
+                }
+            }
+        }
+        return active == activeLevels && expectedBest == best;
+    }
+
 private:
     [[nodiscard]] std::uint64_t offsetOf(const Price price) const noexcept {
         return static_cast<std::uint64_t>(price.value) - static_cast<std::uint64_t>(minPrice.value);

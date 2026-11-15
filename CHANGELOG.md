@@ -10,6 +10,11 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- Invariant checker and halt: `checkInvariants()` on the book (returns the first
+  `InvariantViolation`), on every ladder (now part of the `PriceLadder` concept) and on
+  `PriceLevel`; `audit()`; `BookLimits::auditEvery`; `halt()`, `resume()`, `isHalted()`,
+  `haltReason()`, `lastViolation()`; reject reason `INSTRUMENT_HALTED` (cancels still work). The
+  differential tests run the full check every 4,096 steps. Requirements FR-45, NFR-20, NFR-21.
 - Time in force and qualifiers: `TimeInForce` {DAY, GTC, IOC, FOK}; `OrderRequest::timeInForce`,
   `postOnly`, `minQuantity`; `Order::getTimeInForce()`, `isPostOnly()` (flags at offset 58).
   FOK and minimum quantity decide from a read-only look at the opposite side and never mutate

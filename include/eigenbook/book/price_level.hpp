@@ -106,6 +106,28 @@ public:
         }
     }
 
+    // Audit (cold path, O(orders)): links agree in both directions, head and tail are the ends,
+    // every order points back here, has this price and a non-zero quantity, and count and
+    // aggregate match the queue. The walk is bounded by `count`, so a cycle cannot hang it.
+    [[nodiscard]] bool checkInvariants() const noexcept {
+        if ((head == nullptr) != (tail == nullptr) || (head == nullptr) != (count == 0)) {
+            return false;
+        }
+        std::uint32_t n = 0;
+        Quantity sum{0};
+        const Order* prev = nullptr;
+        for (const Order* it = head; it != nullptr; it = it->next) {
+            if (n == count || it->prev != prev || it->level != this || it->price != levelPrice ||
+                it->quantity.isZero()) {
+                return false;
+            }
+            sum += it->quantity;
+            prev = it;
+            ++n;
+        }
+        return n == count && prev == tail && sum == totalQuantity;
+    }
+
     // Takes over the whole queue of `source` (same price, this level empty) and leaves `source`
     // empty. O(orders): every order's level pointer is re-pointed. Time priority is unchanged.
     void adoptFrom(PriceLevel& source) noexcept {

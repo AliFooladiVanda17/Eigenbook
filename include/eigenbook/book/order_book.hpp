@@ -82,6 +82,24 @@ struct NoFillHandler {
     void operator()(const Fill&) const noexcept {}
 };
 
+// Why a book is halted.
+enum class HaltReason : std::uint8_t {
+    NONE,
+    MANUAL,       // halt(); resume() lifts it
+    AUDIT_FAILED, // an invariant check failed; resume() refuses, the book must be rebuilt
+};
+
+// The first broken invariant checkInvariants() found.
+enum class InvariantViolation : std::uint8_t {
+    LADDER,      // a ladder's own structure or a queue in it (links, counts, aggregates)
+    ORDER_SIDE,  // an order rests in the other side's ladder
+    LOCATOR,     // the locator does not map a resting order's id to that order
+    PRIORITY,    // priority stamps not strictly increasing in a queue, or ahead of the book
+    LIMITS,      // a resting order or level outside BookLimits
+    ORDER_COUNT, // orders in the ladders, the locator and the pool differ, or exceed maxOrders
+    CROSSED,     // best bid >= best ask
+};
+
 // Limit order book for one instrument.
 //
 // Single owner: it is mutated by exactly one (shard) thread and has no internal locking. Fills are
@@ -159,6 +177,41 @@ public:
 
     // Id of the most recent execution; TradeId{0} before the first one.
     [[nodiscard]] TradeId lastTradeId() const noexcept { return {tradeSequence}; }
+
+    // --- Halt and audit ---------------------------------------------------------------------
+    // While halted, addOrder and modifyOrder are rejected with INSTRUMENT_HALTED before any other
+    // check; cancels (participant and administrative) still work, so members can pull orders.
+
+    void halt() noexcept {
+        if (haltState == HaltReason::NONE) {
+            haltState = HaltReason::MANUAL;
+        }
+    }
+
+    // Lifts a manual halt. Returns false, and stays halted, after a failed audit.
+    bool resume() noexcept {
+        if (haltState == HaltReason::AUDIT_FAILED) {
+            return false;
+        }
+        haltState = HaltReason::NONE;
+        return true;
+    }
+
+    [[nodiscard]] bool isHalted() const noexcept { return haltState != HaltReason::NONE; }
+
+    [[nodiscard]] HaltReason haltReason() const noexcept { return haltState; }
+
+    // Full consistency check (cold path, O(orders); dense ladder O(ticks + orders)). Read-only.
+    // nullopt when every invariant holds, otherwise the first violation found.
+    [[nodiscard]] std::optional<InvariantViolation> checkInvariants() const noexcept;
+
+    // checkInvariants(), and on a violation halt with AUDIT_FAILED and remember it.
+    std::optional<InvariantViolation> audit() noexcept;
+
+    // The violation of the last failed audit, if any.
+    [[nodiscard]] std::optional<InvariantViolation> lastViolation() const noexcept {
+        return violation;
+    }
 
     // Number of resting orders on both sides.
     [[nodiscard]] std::size_t orderCount() const noexcept { return index.size(); }
@@ -305,6 +358,18 @@ private:
     std::uint64_t prioritySequence{0};
     // Last TradeId issued.
     std::uint64_t tradeSequence{0};
+    HaltReason haltState{HaltReason::NONE};
+    std::optional<InvariantViolation> violation;
+    // Accepted mutations since the last periodic audit (BookLimits::auditEvery).
+    std::uint32_t sinceAudit{0};
+
+    // Called after every accepted mutation: one compare when auditing is off.
+    void afterMutation() noexcept {
+        if (limits.auditEvery != 0 && ++sinceAudit >= limits.auditEvery) [[unlikely]] {
+            sinceAudit = 0;
+            (void)audit();
+        }
+    }
 };
 
 // Sparse / unbounded prices (map ladder M0: nodes from a pool over the heap).
@@ -345,6 +410,82 @@ BasicOrderBook<Ladder, Locator>::BasicOrderBook(const InstrumentId iInstrument,
     , bidLadder(config)
     , askLadder(config) {
     pool.reserve(iLimits.orderCapacity());
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+auto BasicOrderBook<Ladder, Locator>::checkInvariants() const noexcept
+    -> std::optional<InvariantViolation> {
+    // Structure first: the order walk below relies on consistent queues.
+    if (!bidLadder.checkInvariants() || !askLadder.checkInvariants()) {
+        return InvariantViolation::LADDER;
+    }
+    std::size_t orders = 0;
+    std::optional<InvariantViolation> found;
+    const auto checkSide = [&](const auto& ladder, const OrderSide side) {
+        ladder.forEachLevelWhile([&](const PriceLevel& level) {
+            if (level.quantity() > limits.maxLevelQuantity) {
+                found = InvariantViolation::LIMITS;
+                return false;
+            }
+            std::uint64_t previousStamp = 0;
+            for (const Order* order = level.front(); order != nullptr;
+                 order = order->nextInLevel()) {
+                ++orders;
+                const std::uint64_t stamp = order->getTimestamp().value;
+                if (order->getSide() != side) {
+                    found = InvariantViolation::ORDER_SIDE;
+                } else if (index.find(order->getId()) != order) {
+                    found = InvariantViolation::LOCATOR;
+                } else if (stamp <= previousStamp || stamp > prioritySequence) {
+                    found = InvariantViolation::PRIORITY;
+                } else if (order->getQuantity() > limits.maxOrderQuantity ||
+                           order->getPrice() < limits.minPrice ||
+                           order->getPrice() > limits.maxPrice ||
+                           !notionalWithin(order->getPrice(),
+                                           order->getQuantity(),
+                                           limits.maxNotional)) {
+                    found = InvariantViolation::LIMITS;
+                }
+                if (found) {
+                    return false;
+                }
+                previousStamp = stamp;
+            }
+            return true;
+        });
+    };
+    checkSide(bidLadder, OrderSide::BUY);
+    if (!found) {
+        checkSide(askLadder, OrderSide::SELL);
+    }
+    if (found) {
+        return found;
+    }
+    // Every resting order is in exactly one queue, one locator slot and one pool node.
+    if (orders != index.size() || orders != pool.size() ||
+        (limits.maxOrders != 0 && orders > limits.maxOrders)) {
+        return InvariantViolation::ORDER_COUNT;
+    }
+    const std::optional<Price> bid = bidLadder.bestPrice();
+    const std::optional<Price> ask = askLadder.bestPrice();
+    if (bid && ask && *bid >= *ask) {
+        return InvariantViolation::CROSSED;
+    }
+    return std::nullopt;
+}
+
+template <template <OrderSide> class Ladder, typename Locator>
+    requires PriceLadder<Ladder<OrderSide::BUY>> && PriceLadder<Ladder<OrderSide::SELL>> &&
+             OrderLocator<Locator>
+auto BasicOrderBook<Ladder, Locator>::audit() noexcept -> std::optional<InvariantViolation> {
+    const std::optional<InvariantViolation> result = checkInvariants();
+    if (result) [[unlikely]] {
+        violation = result;
+        haltState = HaltReason::AUDIT_FAILED;
+    }
+    return result;
 }
 
 template <template <OrderSide> class Ladder, typename Locator>
@@ -501,11 +642,16 @@ template <template <OrderSide> class Ladder, typename Locator>
 template <typename OnFill>
 auto BasicOrderBook<Ladder, Locator>::addOrder(const OrderRequest& request, OnFill&& onFill)
     -> Result {
+    if (isHalted()) [[unlikely]] {
+        return std::unexpected(RejectReason::INSTRUMENT_HALTED);
+    }
     // Every check happens before any mutation: a rejected order leaves the book untouched.
     if (const std::optional<RejectReason> reject = validateNew(request)) [[unlikely]] {
         return std::unexpected(*reject);
     }
-    return execute(request, onFill);
+    const Result result = execute(request, onFill);
+    afterMutation();
+    return result;
 }
 
 template <template <OrderSide> class Ladder, typename Locator>
@@ -566,6 +712,7 @@ auto BasicOrderBook<Ladder, Locator>::cancelOrder(const OrderId id)
     }
     const Quantity open = order->getQuantity();
     removeResting(*order);
+    afterMutation();
     return open;
 }
 
@@ -583,6 +730,7 @@ auto BasicOrderBook<Ladder, Locator>::cancelOrder(const OrderId id, const Partic
     }
     const Quantity open = order->getQuantity();
     removeResting(*order);
+    afterMutation();
     return open;
 }
 
@@ -592,6 +740,9 @@ template <template <OrderSide> class Ladder, typename Locator>
 template <typename OnFill>
 auto BasicOrderBook<Ladder, Locator>::modifyOrder(const ModifyRequest& request, OnFill&& onFill)
     -> Result {
+    if (isHalted()) [[unlikely]] {
+        return std::unexpected(RejectReason::INSTRUMENT_HALTED);
+    }
     Order* order = index.find(request.id);
     if (order == nullptr) [[unlikely]] {
         return std::unexpected(RejectReason::UNKNOWN_ORDER_ID);
@@ -609,6 +760,7 @@ auto BasicOrderBook<Ladder, Locator>::modifyOrder(const ModifyRequest& request, 
     if (request.price == order->getPrice() && request.quantity <= order->getQuantity()) {
         // Same price, not larger: O(1) in place, time priority kept. Only lowers aggregates.
         PriceLevel::ownerOf(*order)->reduce(*order, request.quantity);
+        afterMutation();
         return ExecutionResult{.resting = request.quantity};
     }
 
@@ -634,7 +786,9 @@ auto BasicOrderBook<Ladder, Locator>::modifyOrder(const ModifyRequest& request, 
                                .timeInForce = order->getTimeInForce(),
                                .postOnly = order->isPostOnly()};
     detachForReentry(*order); // the locator keeps the id valid (unbind), so no admission is needed
-    return execute(reentry, onFill);
+    const Result result = execute(reentry, onFill);
+    afterMutation();
+    return result;
 }
 
 template <template <OrderSide> class Ladder, typename Locator>

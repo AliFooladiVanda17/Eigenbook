@@ -20,6 +20,7 @@ enum class RejectReason : std::uint8_t {
     NOT_OWNER,            // cancel / modify by a participant that does not own the order
     POST_ONLY_WOULD_TRADE, // a post-only order (or its re-entry) would take liquidity
     INVALID_QUALIFIERS,    // time in force, post-only and minimum quantity do not fit together
+    INSTRUMENT_HALTED,     // the book is halted: no new orders or modifies (cancels still work)
 };
 
 } // namespace eigenbook
