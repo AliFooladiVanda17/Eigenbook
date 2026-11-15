@@ -10,6 +10,13 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- Formal model of matching (Phase B2.1): TLA+ specification `formal/tla/EigenbookMatching.tla`
+  (add limit / market, cancel, reduce, re-entry, IOC, FOK, post-only; 14 invariants), TLC
+  models `EigenbookMatching.cfg` (default) and `EigenbookMatching_large.cfg`, and
+  `formal/tla/mutation_check.sh` (one seeded fault per invariant; 14 of 14 caught). The default
+  model (4,886,533 distinct states) and the large model (64,807,213) pass. Tools pinned (TLA+
+  tools v1.7.4, SHA-256 recorded), not vendored. `formal/README.md`, ADR 0005, plan `docs/plans/PHASE-B2.md`,
+  requirement NFR-22; NFR-23 (trace validation) planned.
 - Invariant checker and halt: `checkInvariants()` on the book (returns the first
   `InvariantViolation`), on every ladder (now part of the `PriceLadder` concept) and on
   `PriceLevel`; `audit()`; `BookLimits::auditEvery`; `halt()`, `resume()`, `isHalted()`,
