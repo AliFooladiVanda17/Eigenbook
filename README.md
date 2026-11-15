@@ -54,6 +54,21 @@ owned by a single thread so that matching needs no locks.
     bounded, incremental recentering; any price, no allocation after construction.
 - **Capacity is a reject:** a bounded ladder that is full returns `CAPACITY_EXCEEDED` before any
   matching, for adds and modifies, instead of allocating.
+- **Per-instrument limits (`BookLimits`):** maximum order and level quantity, a price band, a
+  notional limit (computed exactly, without overflow) and a hard order limit that preallocates
+  storage and rejects instead of growing. Every check runs before any mutation; a modify is
+  all-or-nothing.
+- **Ownership and trade ids:** every order carries its `ParticipantId`; only the owner may modify
+  it or cancel it with `cancelOrder(id, participant)` (`cancelOrder(id)` is the administrative
+  cancel). Fills carry a per-book `TradeId` and the maker's owner.
+- **Time in force and qualifiers:** DAY, GTC, IOC, FOK, post-only and minimum quantity. FOK and
+  minimum quantity decide from a read-only look at the book and never trade partly when they
+  fail; post-only never takes liquidity, on entry or on a modify.
+- **Self-checking:** `checkInvariants()` audits every ladder, queue, locator entry, priority stamp
+  and limit; `auditEvery` runs it periodically and halts the book on a violation. A halted book
+  (`halt()`) rejects adds and modifies and still accepts cancels.
+- **Priority owned by the book:** resting orders are stamped with the book's own priority
+  sequence; caller timestamps never decide priority.
 - **No allocation in the sweep:** fills are reported through a callback; resting orders come from
   a pre-reserved object pool.
 - **One cache line per order:** each `Order` node is exactly 64 bytes (`static_assert`).
@@ -63,28 +78,35 @@ owned by a single thread so that matching needs no locks.
 - **Header-only:** link `Eigenbook::book`; nothing is compiled on the consumer's behalf.
 - **Tested against a reference model:** randomized differential tests run every ladder against a
   deliberately naive reference book, including a drifting-mid stream that keeps the hybrid
-  window recentering.
+  window recentering and a stream with random time in force and post-only.
+- **Formally specified:** the matching rules are written in TLA+ and model-checked with TLC
+  (14 invariants; 4.9 million distinct states in the default model, 65 million in the large
+  one; every invariant shown falsifiable by a seeded fault); see
+  [formal/README.md](formal/README.md). Checking the C++ book against the specification (trace
+  validation) is the next step.
 
 ## Known limitations
 
 These are tracked in [docs/plans/PHASE-A.md](docs/plans/PHASE-A.md) and fixed in the phases
 named there. Until then, do not expose the book to untrusted input.
 
-- Resting an order can allocate (and throw `std::bad_alloc`) when the order pool or the order
-  index has to grow beyond what was reserved at construction, and, for the default `OrderBook`
-  (map ladder M0), when its node pool grows. The zero-allocation test shows M0 doing this after
-  warm-up whenever the number of live price levels reaches a new high (workload W2-drift); the
-  dense, M1, M2 and hybrid books did not allocate in any workload.
-- A modify that re-enters the order removes the original first; if re-insertion throws, the
-  order is lost.
-- No ownership check: any caller can cancel or modify any order id. No self-trade prevention,
-  no price protection on market orders, no maximum order size.
-- `Quantity` / `Price` arithmetic is unchecked; the dense ladder's range check computes
-  `price - minPrice` in signed 64-bit, which overflows for extreme prices.
+- Unless `BookLimits::maxOrders` is set, resting an order can allocate (and throw
+  `std::bad_alloc`) when the order pool or the order index has to grow beyond what was reserved
+  at construction. The default `OrderBook` (map ladder M0) also allocates when its node pool
+  grows: the zero-allocation test shows it after warm-up whenever the number of live price levels
+  reaches a new high (workload W2-drift); the dense, M1, M2 and hybrid books did not allocate in
+  any workload.
+- With map ladder M0, a modify that re-enters the order removes the original before the new
+  position is linked; if the tree node allocation then throws, the order is lost. Every reject is
+  checked first (all-or-nothing), and the other ladders cannot allocate there.
+- No self-trade prevention (Phase B7) and no price protection on market orders (Phase B6).
 - The default order index hash is a public, invertible mixer, so colliding client-chosen ids can be
   constructed; erase and lookup have no O(1) worst case. Use `HardenedOrderIndex` (client ids) or
   `DirectOrderTable` (engine-issued handles, O(1) worst case) where that matters (ADR 0004).
-- Timestamps are supplied by the caller.
+- No engine clock yet: priority uses the book's own sequence, and input time arrives with the
+  sequencer (Phase B3). DAY orders do not expire until sessions exist (Phase B4/B8).
+- The cost of the B1 checks on the hot path has not been measured yet (see
+  [docs/plans/PHASE-B1.md](docs/plans/PHASE-B1.md)).
 
 ---
 
@@ -278,13 +300,20 @@ ctest --preset dev-debug          # or msvc-debug, asan-ubsan, msvc-asan, ...
 | [tests/unit/fixed_block_resource_test.cpp](tests/unit/fixed_block_resource_test.cpp) | The M2 single-size block resource |
 | [tests/unit/locator_test.cpp](tests/unit/locator_test.cpp) | Direct order table and hardened hash index |
 | [tests/unit/locator_book_test.cpp](tests/unit/locator_book_test.cpp) | Books with engine-issued handles and with the hardened index |
-| [tests/differential/differential_test.cpp](tests/differential/differential_test.cpp) | 20 000 random operations: map ladder vs dense ladder vs a reference model |
+| [tests/unit/limits_test.cpp](tests/unit/limits_test.cpp) | `BookLimits`, checked arithmetic, all-or-nothing modify, priority sequence |
+| [tests/unit/participant_test.cpp](tests/unit/participant_test.cpp) | Ownership (`NOT_OWNER`), administrative cancel, trade ids, maker owner on fills |
+| [tests/unit/time_in_force_test.cpp](tests/unit/time_in_force_test.cpp) | IOC, FOK, minimum quantity, post-only, invalid qualifier combinations |
+| [tests/unit/invariants_test.cpp](tests/unit/invariants_test.cpp) | `checkInvariants()` on simulated corruption, `audit()`, `auditEvery`, halt and resume |
+| [tests/differential/differential_test.cpp](tests/differential/differential_test.cpp) | Random streams (static band, drifting mid, random qualifiers, engine-issued handles): every ladder vs a reference model, with a full invariant audit every 4,096 steps |
 | [tests/alloc/zero_alloc_test.cpp](tests/alloc/zero_alloc_test.cpp) | Separate binary with counting `operator new` and pmr default resource: zero allocations in the measured part of every workload |
 | [tests/unit/index_instrumentation_test.cpp](tests/unit/index_instrumentation_test.cpp) | Separate binary built with `EIGENBOOK_INSTRUMENT_INDEX`: index probe statistics |
 | [tests/package_consumer/](tests/package_consumer/) | CTest `package_consumer`: installs the build and builds a separate project against it with `find_package(Eigenbook)` |
 
-`ctest` runs 315 GoogleTest cases in three executables plus the `package_consumer` test. Each
+`ctest` runs 463 GoogleTest cases in three executables plus the `package_consumer` test. Each
 test is mapped to a requirement in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+
+The matching rules are also model-checked in TLA+ (TLC); how to run it and the recorded runs are
+in [formal/README.md](formal/README.md).
 
 ---
 
@@ -310,7 +339,8 @@ cmake --preset bench && cmake --build --preset bench
 
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the data structures, the matching model,
 complexity, and the target architecture around the book. Architecture decisions are recorded in
-[docs/adr/](docs/adr/).
+[docs/adr/](docs/adr/). The formal specification of the matching rules, and how it maps to the
+C++ state, is in [formal/README.md](formal/README.md).
 
 ---
 
@@ -322,7 +352,8 @@ Eigenbook/
 ├── CMakePresets.json         Configure / build / test presets
 ├── cmake/                    Warnings, sanitizers, dependencies, install/export, package config
 ├── include/eigenbook/        Public headers (namespace eigenbook)
-│   ├── core/                 types.hpp, order.hpp, reject_reason.hpp
+│   ├── core/                 types.hpp, order.hpp, reject_reason.hpp, book_limits.hpp,
+│   │                         checked_math.hpp
 │   ├── book/                 order_book.hpp, price_level.hpp, price_ladder.hpp (concept)
 │   │   ├── ladder/           map_ladder.hpp, dense_ladder.hpp, hybrid_ladder.hpp
 │   │   └── locator/          order_locator.hpp (concept), hash_order_index.hpp,
@@ -342,6 +373,8 @@ Eigenbook/
 │   ├── differential/         Ladders vs reference model
 │   ├── alloc/                Zero-allocation test binary
 │   └── package_consumer/     find_package(Eigenbook) smoke project
+├── formal/
+│   └── tla/                  TLA+ specification, TLC models, mutation check
 └── docs/
     ├── REQUIREMENTS.md       Requirements and test traceability
     ├── ARCHITECTURE.md       Design
@@ -366,8 +399,10 @@ Detailed plans live in [docs/plans/](docs/plans/).
       measured (A4); summary in [docs/RESULTS_SUMMARY.md](docs/RESULTS_SUMMARY.md)
 
 **Phase B: around the book** (one phase at a time)
-- [ ] Hard capacity limits, all-or-nothing modify, checked arithmetic, ownership, IOC/FOK/post-only
-- [ ] Formal model of matching (TLA+) and trace validation
+- [x] Hard capacity limits, all-or-nothing modify, checked arithmetic, ownership, IOC/FOK/post-only,
+      invariant checker and halt (B1; the hot-path cost is not measured yet)
+- [ ] Formal model of matching (TLA+): specification and model check done (B2.1); trace
+      validation of the C++ book (B2.2) open
 - [ ] Sequencer, journal, snapshots, deterministic replay
 - [ ] Trading phases, auctions, price protection, self-trade prevention, risk gate
 - [ ] Market-data and order-entry sessions, thread-per-shard engine, primary/backup
