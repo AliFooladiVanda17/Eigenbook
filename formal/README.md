@@ -1,9 +1,11 @@
 # Formal model of matching
 
 This directory holds the TLA+ specification of the matching rules of one Eigenbook book (Phase
-B2), the TLC models that check it, and the mutation check that shows every invariant can fail.
-Decision record: [ADR 0005](../docs/adr/0005-formal-model-of-matching.md). Plan:
-[docs/plans/PHASE-B2.md](../docs/plans/PHASE-B2.md).
+B2), the TLC models that check it, the mutation check that shows every invariant can fail, and
+the trace validation that checks the C++ book against the specification. Decision records:
+[ADR 0005](../docs/adr/0005-formal-model-of-matching.md) (model) and
+[ADR 0006](../docs/adr/0006-trace-validation-against-the-specification.md) (trace validation).
+Plan: [docs/plans/PHASE-B2.md](../docs/plans/PHASE-B2.md).
 
 | File | Purpose |
 |---|---|
@@ -11,6 +13,9 @@ Decision record: [ADR 0005](../docs/adr/0005-formal-model-of-matching.md). Plan:
 | [tla/EigenbookMatching.cfg](tla/EigenbookMatching.cfg) | default model (2 prices, 3 ids, quantity ≤ 2) |
 | [tla/EigenbookMatching_large.cfg](tla/EigenbookMatching_large.cfg) | large model (3 prices, 3 ids, quantity ≤ 2) |
 | [tla/mutation_check.sh](tla/mutation_check.sh) | vacuity check: one seeded fault per invariant, each must be caught |
+| [tla/EigenbookTrace.tla](tla/EigenbookTrace.tla) | trace check: follows one recorded trace with the specification's actions |
+| [tla/check_traces.sh](tla/check_traces.sh) | generates traces, checks each with TLC, runs the negative controls |
+| [../tests/trace/](../tests/trace/) | recorder, generator (`eigenbook_trace_gen`), converter (`eigenbook_trace_to_tla`) |
 
 ## Status
 
@@ -20,11 +25,13 @@ Decision record: [ADR 0005](../docs/adr/0005-formal-model-of-matching.md). Plan:
 | B2.1 default model checked (TLC) | done: no violation, 4,886,533 distinct states |
 | B2.1 every invariant falsifiable | done: 14 of 14 mutants caught |
 | B2.1 large model checked (TLC) | done: no violation, 64,807,213 distinct states |
-| B2.2 trace validation of the C++ book | not started |
+| B2.2 trace validation of the C++ book | done: 21 of 21 traces accepted (7 book types × 3 seeds × 500 events); 5 of 5 corrupted traces rejected at the corrupted step |
 
-What a passing run means: within the bounds, every reachable state satisfies every invariant, so
-the rules as written are consistent with each other. It does **not** yet mean that the C++ book
-follows them; that is what B2.2 (trace validation) checks.
+What the two checks mean together. Model checking: within the bounds, every reachable state
+satisfies every invariant, so the rules as written are consistent with each other. Trace
+validation: every recorded behaviour of the C++ book, under the abstraction function below, is a
+behaviour of the specification, so on those runs the book follows the rules. Neither is a proof
+for all inputs: model checking is bounded, and trace validation covers the recorded runs only.
 
 ## Verification pipeline
 
@@ -34,21 +41,23 @@ flowchart LR
     sany["SANY<br/>parse + semantic check"]
     tlc["TLC<br/>exhaustive BFS<br/>default / large model"]
     mut["mutation_check.sh<br/>14 seeded faults"]
-    book["C++ BasicOrderBook"]
-    trace["NDJSON trace<br/>(debug builds)"]
-    tv["trace checker"]
+    book["C++ books<br/>(7 types)"]
+    rec["trace recorder<br/>+ abstraction function"]
+    trace["NDJSON traces"]
+    conv["eigenbook_trace_to_tla"]
+    tv["TLC on EigenbookTrace.tla<br/>one step per event"]
+    neg["5 corrupted traces"]
 
     spec --> sany --> tlc
     spec --> mut
-    book -.->|"B2.2"| trace -.-> tv
-    spec -.->|"B2.2"| tv
+    book --> rec --> trace --> conv --> tv
+    spec --> tv
+    trace --> neg --> conv
 
     tlc -->|"no violation"| ok1(["rules consistent<br/>within bounds"])
     mut -->|"every mutant caught"| ok2(["invariants<br/>not vacuous"])
-    tv -.->|"every trace accepted"| ok3(["book conforms<br/>to the rules"])
+    tv -->|"every trace accepted,<br/>every corruption rejected"| ok3(["book follows the rules<br/>on the recorded runs"])
 ```
-
-Solid edges exist today; dashed edges are Phase B2.2.
 
 ## The model
 
@@ -65,8 +74,11 @@ Solid edges exist today; dashed edges are Phase B2.2.
 | `volume` | ghost: total quantity traded so far | the sum of `Fill::quantity` over all calls |
 | `last` | the last action, its parameters and its trades | the last call and the `Fill`s it reported, in order |
 
-This table is the abstraction function from C++ state to specification state that B2.2's trace
-checker implements.
+This table is the abstraction function from C++ state to specification state. The trace
+recorder ([tests/trace/trace_recorder.hpp](../tests/trace/trace_recorder.hpp)) applies it after
+every request; in addition it maps DAY to GTC and, for engine-issued handles, book ids to model
+ids. The ghosts are not recorded: the trace check computes them from the specification's own
+steps.
 
 ### Actions
 
@@ -152,6 +164,109 @@ state space finite without changing any matching rule.
 | `PostOnlyNeverTakes` | a post-only order, or its re-entry, never trades on arrival | FR-39 | `no-post-only-check` |
 | `FilledMatchesTrades` | fills come only from trades: the fills of all ids add up to twice the traded volume | FR-17, FR-18 | `fill-without-trade` |
 
+## Trace validation (B2.2)
+
+### How a trace is checked
+
+```mermaid
+sequenceDiagram
+    participant G as eigenbook_trace_gen
+    participant B as C++ book
+    participant R as trace recorder
+    participant C as eigenbook_trace_to_tla
+    participant T as TLC (EigenbookTrace.tla)
+
+    loop every request of a seeded stream
+        G->>B: addOrder / cancelOrder / modifyOrder
+        B-->>G: result + fills
+        G->>R: event (model ids, abstract tif)
+        R->>B: read levels, queues, resting orders
+        R-->>G: one NDJSON line
+    end
+    G->>C: trace.ndjson
+    C->>T: TraceData.tla + Trace.cfg (bounds of this trace)
+    loop l = 1 .. Len(Trace)
+        T->>T: apply the spec's action for event l
+        T->>T: require queues, resting orders, trades, reject flag = recorded
+    end
+    T-->>G: TraceIncomplete violated = ACCEPTED, or deadlock at l = REJECTED at l
+```
+
+`EigenbookTrace.tla` has one candidate behaviour: step `l` applies the specification's action for
+event `l` (for a modify, the specification decides between reduce and re-entry) and requires the
+resulting state to equal the recorded one. The result is read from TLC's output:
+
+| TLC reports | Meaning |
+|---|---|
+| `Invariant TraceIncomplete is violated` | every event matched: the trace is a behaviour of the specification (**accepted**) |
+| `Deadlock reached`, last state has `l = k` | event `k` has no matching step: book and specification disagree there (**rejected at k**) |
+| another invariant violated | the book reached a state that breaks a rule of the specification |
+
+### Trace format
+
+One JSON object per line. The first line is a header; every other line is one request and the
+state after it, already in model terms (the recorder applies the abstraction function).
+
+```json
+{"format":"eigenbook-matching-trace","version":1,"book":"dense","seed":1,"prices":3,"maxQty":3,"steps":2}
+{"step":2,"kind":"addLimit","id":2,"side":"BUY","price":2,"qty":1,"tif":"GTC","po":false,"result":"accepted","trades":[{"maker":1,"price":2,"qty":1}],"q":{"BUY":[[],[],[]],"SELL":[[],[1],[]]},"resting":[{"id":1,"qty":1,"stamp":1,"tif":"GTC","po":true}]}
+```
+
+| Field | Meaning |
+|---|---|
+| `kind` | `addLimit`, `addMarket`, `cancel`, `modify` |
+| `id`, `side`, `price`, `qty`, `tif`, `po` | the request, in model ids and abstract time in force |
+| `result` | `accepted`, or `rejected` (only `POST_ONLY_WOULD_TRADE` is a modelled reject) |
+| `trades` | the fills of this request, in order: maker id, price, quantity |
+| `q` | per side, per model price 1..P, the queue of model ids in time priority |
+| `resting` | per resting order: id, open quantity, priority stamp, time in force, post-only |
+
+`TraceFormat.*` in `eigenbook_tests` pins this format (a golden line from a known scenario, the
+JSON reader, the JSON-to-TLA+ mapping) without needing Java.
+
+### Generated streams
+
+Seeded, inside the model's vocabulary: unique ids, prices 1..5, quantities 1..3; limit orders
+with DAY, GTC, IOC or FOK (post-only only with DAY or GTC), three in four of them passive so
+that queues form; market orders with IOC or FOK; cancels and modifies of resting orders (half at
+the same price, half at a new one). Any reject other than `POST_ONLY_WOULD_TRADE` stops the
+generator, and the book's own `checkInvariants()` runs after every step.
+
+### Recorded run (2026-11-24)
+
+`check_traces.sh --seeds 3 --steps 500`, same machine and TLC as above, one TLC worker per trace,
+`-Xss64m`. All 21 traces accepted; 427 s for the 21 checks.
+
+| Seed | Trades | Multi-level sweeps | Longest queue | Post-only rejects | FOK without fill | Cancels | Reduces | Re-entries | Result (7 book types) |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 83 | 11 | 4 | 8 | 58 | 87 | 36 | 46 | 7 × accepted |
+| 2 | 107 | 20 | 5 | 12 | 45 | 80 | 32 | 54 | 7 × accepted |
+| 3 | 81 | 12 | 4 | 8 | 55 | 86 | 33 | 54 | 7 × accepted |
+
+The book types are `map` (M0), `map-m1`, `map-m2`, `dense`, `hybrid`, `dense-hardened` and
+`dense-direct` (engine-issued handles, translated to model ids by the recorder). For each seed the
+seven abstract traces are byte-identical: under the abstraction function the implementations
+cannot be told apart. So the run validates 3 distinct behaviours, each on seven implementations.
+
+Negative controls, applied to `dense-direct-seed1`:
+
+| Corruption | Changed step | Result |
+|---|---|---|
+| `trade-price`: the first trade's price + 1 | 16 | rejected at 16 |
+| `drop-trade`: the last trade of a request removed | 16 | rejected at 16 |
+| `stamp`: a resting order's priority stamp + 1 | 5 | rejected at 5 |
+| `queue-order`: the first two orders of a queue swapped | 15 | rejected at 15 |
+| `result-flip`: accepted written as rejected | 1 | rejected at 1 |
+
+Two findings while building it:
+
+- The first generator drew limit prices uniformly. Almost every order crossed, the book stayed
+  nearly empty, and no queue ever held two orders, so time priority inside a level was never
+  exercised (the `queue-order` control had nothing to apply to). The generator now builds a
+  book, and the coverage counters above make that visible.
+- Traces with many ids overflowed the JVM stack in the specification's recursive sum over ids;
+  the check runs TLC with `-Xss64m`.
+
 ## Running
 
 Requirements: Java 11 or later and `tla2tools.jar` from the TLA+ tools release
@@ -172,7 +287,22 @@ java -XX:+UseParallelGC -cp ../../build/tools/tla2tools-1.7.4.jar tlc2.TLC \
 
 cd ../..
 formal/tla/mutation_check.sh                   # exit status 0 = every mutant caught
+
+# Trace validation: build the tools first (any preset), then
+formal/tla/check_traces.sh --gen build/dev-release/tests/eigenbook_trace_gen \
+     --to-tla build/dev-release/tests/eigenbook_trace_to_tla \
+     --jar build/tools/tla2tools-1.7.4.jar --seeds 3 --steps 500
 ```
+
+Trace validation as a CTest test: configure with the jar path, then run the `formal` label.
+
+```bash
+cmake --preset dev-release -DEIGENBOOK_TLA_TOOLS_JAR=$PWD/build/tools/tla2tools-1.7.4.jar
+ctest --preset dev-release -L formal       # formal_trace_validation: 2 seeds x 200 events
+```
+
+Without `EIGENBOOK_TLA_TOOLS_JAR` (the default) the test is not registered and the build needs
+neither Java nor the jar.
 
 | File | Version | SHA-256 |
 |---|---|---|

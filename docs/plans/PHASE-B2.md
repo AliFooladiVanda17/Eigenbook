@@ -69,6 +69,40 @@ still a pre-release) and the SHA-256 of the copy used is recorded in `formal/REA
 - Not run: 4 ids, quantity ≤ 3 (see `formal/README.md`, "Bounds not yet checked").
 - Recorded runs and environment: `formal/README.md`.
 
+## Outcome of B2.2
+
+As built (decisions in ADR 0006):
+
+- Tracing is a recorder outside the book (`tests/trace/trace_recorder.hpp`), not a debug-build
+  branch: the book's code is unchanged, and the trace is written in model terms (abstraction
+  function applied by the recorder).
+- TLC reads the trace through a converter (`eigenbook_trace_to_tla`) instead of the
+  CommunityModules `Json` module. Downloading that second jar failed repeatedly (Windows could not
+  reach the certificate revocation server); the converter has no dependency and maps JSON the same
+  way.
+- `EigenbookTrace.tla` follows a trace with one deterministic step per event; TLC's verdict is
+  read as accepted (`TraceIncomplete` violated), rejected at `l` (deadlock) or rule broken
+  (another invariant).
+- The first generator drained the book (uniform prices, nearly every order crossed) and never
+  formed a queue of two orders, so time priority inside a level was not exercised; the
+  `queue-order` negative control exposed it. The generator now builds a book and prints coverage
+  counters per trace.
+- Long traces overflowed the JVM stack in the recursive sum over ids; TLC runs with `-Xss64m`.
+- Recorded run: 3 seeds × 7 book types × 500 events, 21 of 21 traces accepted in 427 s; the 5
+  corruptions rejected exactly at the corrupted step. For each seed the seven abstract traces are
+  byte-identical, so the run checks 3 distinct behaviours on seven implementations.
+- CTest: `formal_trace_validation` (label `formal`, 2 seeds × 200 events, about 53 s), registered
+  only when `EIGENBOOK_TLA_TOOLS_JAR` is set.
+
+Not done in B2.2:
+
+- CI itself: Phase B12 sets up CI; the CTest test is ready for it.
+- Traces of the existing differential-test streams, as the brief suggests. The generator uses its
+  own streams of the same request kinds. Recording the differential streams would need the
+  recorder to map their prices (around 1,000) to model prices with an offset; a trace check does
+  not enumerate states, so their larger quantities would cost nothing.
+- The general minimum quantity, limits, capacity, participants and halts: outside the model.
+
 ## Risks
 
 - State explosion: the bounds above are the starting point; record the counts and shrink if

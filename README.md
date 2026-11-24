@@ -82,8 +82,9 @@ owned by a single thread so that matching needs no locks.
 - **Formally specified:** the matching rules are written in TLA+ and model-checked with TLC
   (14 invariants; 4.9 million distinct states in the default model, 65 million in the large
   one; every invariant shown falsifiable by a seeded fault); see
-  [formal/README.md](formal/README.md). Checking the C++ book against the specification (trace
-  validation) is the next step.
+  [formal/README.md](formal/README.md). Every book type is also checked against the
+  specification by trace validation: recorded runs are replayed by TLC step by step, and
+  deliberately corrupted traces must be rejected.
 
 ## Known limitations
 
@@ -184,6 +185,8 @@ Run the demo:
 | `EIGENBOOK_INSTALL` | ON if top-level | Generate install and package-export rules |
 | `EIGENBOOK_WARNINGS_AS_ERRORS` | OFF | `-Werror` / `/WX` for our own targets |
 | `EIGENBOOK_SANITIZE` | empty | `address;undefined`, `thread`, or `address` (MSVC) |
+| `EIGENBOOK_LONG_TESTS` | OFF | Long differential runs (1,000,000 steps × 5 seeds) |
+| `EIGENBOOK_TLA_TOOLS_JAR` | empty | Path to `tla2tools.jar` (v1.7.4): registers the CTest test `formal_trace_validation` (needs Java 11+ and bash); never downloaded by the build |
 
 "Top-level" means Eigenbook is the project being configured, not a subdirectory of another one.
 
@@ -308,12 +311,16 @@ ctest --preset dev-debug          # or msvc-debug, asan-ubsan, msvc-asan, ...
 | [tests/alloc/zero_alloc_test.cpp](tests/alloc/zero_alloc_test.cpp) | Separate binary with counting `operator new` and pmr default resource: zero allocations in the measured part of every workload |
 | [tests/unit/index_instrumentation_test.cpp](tests/unit/index_instrumentation_test.cpp) | Separate binary built with `EIGENBOOK_INSTRUMENT_INDEX`: index probe statistics |
 | [tests/package_consumer/](tests/package_consumer/) | CTest `package_consumer`: installs the build and builds a separate project against it with `find_package(Eigenbook)` |
+| [tests/unit/trace_format_test.cpp](tests/unit/trace_format_test.cpp) | The NDJSON trace format, the JSON reader and the JSON-to-TLA+ mapping |
+| [tests/trace/](tests/trace/) | Trace recorder, `eigenbook_trace_gen`, `eigenbook_trace_to_tla` (trace validation tools) |
 
-`ctest` runs 463 GoogleTest cases in three executables plus the `package_consumer` test. Each
-test is mapped to a requirement in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
+`ctest` runs 468 GoogleTest cases in three executables plus the `package_consumer` test, and,
+when `EIGENBOOK_TLA_TOOLS_JAR` is set, `formal_trace_validation` (label `formal`). Each test is
+mapped to a requirement in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
-The matching rules are also model-checked in TLA+ (TLC); how to run it and the recorded runs are
-in [formal/README.md](formal/README.md).
+The matching rules are also model-checked in TLA+ (TLC), and the books are trace-validated
+against that specification; how to run both and the recorded runs are in
+[formal/README.md](formal/README.md).
 
 ---
 
@@ -372,9 +379,10 @@ Eigenbook/
 │   ├── unit/                 One file per component
 │   ├── differential/         Ladders vs reference model
 │   ├── alloc/                Zero-allocation test binary
+│   ├── trace/                Trace recorder, generator and converter (trace validation)
 │   └── package_consumer/     find_package(Eigenbook) smoke project
 ├── formal/
-│   └── tla/                  TLA+ specification, TLC models, mutation check
+│   └── tla/                  TLA+ specification, TLC models, mutation check, trace check
 └── docs/
     ├── REQUIREMENTS.md       Requirements and test traceability
     ├── ARCHITECTURE.md       Design
@@ -401,8 +409,8 @@ Detailed plans live in [docs/plans/](docs/plans/).
 **Phase B: around the book** (one phase at a time)
 - [x] Hard capacity limits, all-or-nothing modify, checked arithmetic, ownership, IOC/FOK/post-only,
       invariant checker and halt (B1; the hot-path cost is not measured yet)
-- [ ] Formal model of matching (TLA+): specification and model check done (B2.1); trace
-      validation of the C++ book (B2.2) open
+- [x] Formal model of matching (TLA+), model-checked (B2.1), and trace validation of every book
+      type against it (B2.2)
 - [ ] Sequencer, journal, snapshots, deterministic replay
 - [ ] Trading phases, auctions, price protection, self-trade prevention, risk gate
 - [ ] Market-data and order-entry sessions, thread-per-shard engine, primary/backup

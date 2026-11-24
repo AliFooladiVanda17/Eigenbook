@@ -22,6 +22,11 @@ option(EIGENBOOK_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(EIGENBOOK_LONG_TESTS "Run the long randomised differential tests" OFF)
 set(EIGENBOOK_SANITIZE "" CACHE STRING
     "Sanitizers for every target in this build: address;undefined, or thread (empty = none)")
+# Trace validation against the TLA+ specification (formal/README.md) runs as the CTest test
+# formal_trace_validation only when this points at the pinned tla2tools.jar and Java and bash are
+# found. The formal tools are never downloaded by the build (ADR 0005).
+set(EIGENBOOK_TLA_TOOLS_JAR "" CACHE FILEPATH
+    "Path to tla2tools.jar (v1.7.4) for the trace-validation test (empty = test not registered)")
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)

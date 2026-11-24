@@ -10,6 +10,14 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- Trace validation of the C++ book against the TLA+ specification (Phase B2.2): a trace recorder
+  outside the book (`tests/trace/trace_recorder.hpp`, NDJSON in model terms), the seeded
+  generator `eigenbook_trace_gen` (every book type, coverage counters), the converter
+  `eigenbook_trace_to_tla`, `formal/tla/EigenbookTrace.tla` (one deterministic step per event)
+  and `formal/tla/check_traces.sh` with five negative controls. Recorded run: 21 of 21 traces
+  accepted (7 book types × 3 seeds × 500 events), every corruption rejected at the corrupted step.
+  CTest `formal_trace_validation` (label `formal`) when `EIGENBOOK_TLA_TOOLS_JAR` is set. Tests
+  `TraceFormat.*`. ADR 0006, requirement NFR-23.
 - Formal model of matching (Phase B2.1): TLA+ specification `formal/tla/EigenbookMatching.tla`
   (add limit / market, cancel, reduce, re-entry, IOC, FOK, post-only; 14 invariants), TLC
   models `EigenbookMatching.cfg` (default) and `EigenbookMatching_large.cfg`, and
