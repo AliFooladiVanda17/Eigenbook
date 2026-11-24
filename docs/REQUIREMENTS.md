@@ -128,6 +128,16 @@ environment Phase A2 was built in.
 | FR-52 | Each shard MUST be processed by one dedicated thread that owns all of its books. | Planned |
 | FR-53 | Orders MUST reach their shard through a per-shard dispatch queue. | Planned |
 
+### 2.7 Sequencing and the engine core (Phase B3)
+
+| ID | Requirement | Status | Verified by |
+|---|---|---|---|
+| FR-60 | Every input MUST pass through the sequencer, which gives it a sequence number one greater than the previous input's (from 1, or after the last journaled input on restart) and a timestamp that never decreases, even when the clock steps back. The engine MUST read no other clock. | Done | `Sequencer.*`; no clock in `engine/engine.hpp` or the book (code review, not a test) |
+| FR-61 | The engine MUST apply only the next input sequence. A gap (`SEQUENCE_GAP`) or a repeat (`DUPLICATE_SEQUENCE`) MUST be refused without emitting anything and without changing any state. | Done | `Engine.GapsAndDuplicatesAreRefusedWithoutOutput` |
+| FR-62 | Every applied input MUST produce its fills, in execution order, followed by exactly one summary event (`ACCEPTED`, `MODIFIED`, `CANCELLED`, `REJECTED` with the reason, `HALTED`, `RESUMED`). Every event MUST carry a gap-free output sequence, the input sequence that caused it and that input's time. | Done | `Engine.NewOrderReportsItsFillsThenItsSummary`, `Engine.CancelAndModifyReportTheirOutcome`, `Determinism.TheSameLogGivesByteIdenticalOutput` |
+| FR-63 | A command for an instrument with no registered book MUST be rejected with `UNKNOWN_INSTRUMENT`, and a command of no known type with `INVALID_COMMAND`. Halt and resume MUST be sequenced commands; a cancel command MUST be a participant cancel (FR-35). | Done | `Engine.RejectsAreReportedAndChangeNothing`, `Engine.HaltAndResumeAreSequencedInputs` |
+| FR-64 | Instruments MUST be registered on the cold path; an id that is already registered, or not below `Engine::kMaxInstruments`, MUST be refused. | Done | `Engine.InstrumentRegistrationIsChecked` |
+
 ---
 
 ## 3. Non-functional requirements
@@ -157,6 +167,7 @@ environment Phase A2 was built in.
 | NFR-21 | Robustness | With `BookLimits::auditEvery = N`, the book MUST run the full check after every N-th accepted mutation and halt itself (`AUDIT_FAILED`) on a violation; rejected requests MUST NOT count. With `auditEvery = 0` (default) the cost MUST be one compare per mutation. | Done | `Invariants.PeriodicAuditRunsEveryNMutations`, `Invariants.RejectsAndHaltsDoNotCountAsMutations`; the cost with auditing off by reading `afterMutation()` (not measured on its own) |
 | NFR-22 | Verification | The matching rules MUST have a formal specification (TLA+) that is model-checked on bounded models, with every invariant shown to be falsifiable by a seeded fault; the bounds, tool version and results of every recorded run MUST be documented. Conformance of the C++ book to the specification is NFR-23. | Done (B2.1) | `formal/tla/EigenbookMatching.tla` with TLC runs recorded in `formal/README.md`; `formal/tla/mutation_check.sh` (14 of 14 mutants caught) |
 | NFR-23 | Verification | Every book type MUST be checkable against the TLA+ specification: a recorder outside the book writes each request and the state after it as an NDJSON trace under the abstraction function in `formal/README.md`, and TLC MUST confirm that each trace is a behaviour of the specification, step by step. Every run MUST also show that the check is not vacuous: corrupted traces MUST be rejected at the corrupted step. The tracing MUST NOT add code to the book's hot path. | Done (B2.2) | `formal_trace_validation` (CTest label `formal`, needs `EIGENBOOK_TLA_TOOLS_JAR`); recorded run in `formal/README.md` (21 of 21 traces accepted, 5 of 5 corruptions rejected at the corrupted step); `TraceFormat.*` |
+| NFR-24 | Determinism | The engine's output MUST be a function of its input log: the same log MUST give a byte-identical output stream on a fresh engine and on every book type. `Command`, `SequencedCommand` and `OutputEvent` MUST be fixed-layout values without padding bytes, so that byte comparison is meaningful and the journal can store them as they are. | Done | `Determinism.TheSameLogGivesByteIdenticalOutput`, `Determinism.EveryBookTypeGivesTheSameOutput` (20,000 inputs, three instruments, map M0 / M2, dense, hybrid); `static_assert`s on size, offsets and `has_unique_object_representations` in `engine/command.hpp` and `engine/output_event.hpp` |
 
 ---
 

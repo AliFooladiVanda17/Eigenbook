@@ -7,11 +7,47 @@ architecture around it. Anything not yet implemented is marked **planned**.
 
 ![Target system flow](images/layers.png)
 
-Only the right-hand part exists today: `OrderBook` → bid / ask side → price ladder → price level
-→ FIFO order list. Symbol normalisation, the routing table, shard threads and the order-book
-registry are **planned** (Phase B10). The planned engine follows the sequenced
-state-machine pattern: every input is sequenced once, and each book is a deterministic state
-machine over that log (Phase B3).
+What exists today: the sequencer and the single-threaded engine core (Phase B3.1, below), and
+the book itself, from bid / ask side through price ladder and price level to the FIFO order
+list. Symbol normalisation, the routing table, shard threads and the order-book registry are
+**planned** (Phase B10). The journal, state hash and snapshots are **planned** for Phases B3.2–B3.4.
+
+## Sequencer and engine core
+
+The engine is a deterministic state machine over a sequenced input log (ADR 0007): every input
+is numbered once and timestamped by the sequencer, and the engine's output is a function of that
+log alone.
+
+```mermaid
+sequenceDiagram
+    participant C as caller / gateway
+    participant S as Sequencer (Clock)
+    participant E as Engine (Book)
+    participant B as book (per instrument)
+    participant K as sink
+
+    C->>S: Command (new order, cancel, modify, halt, resume)
+    S-->>C: SequencedCommand {sequence n, time t}
+    C->>E: apply(SequencedCommand, sink)
+    alt n is not the next sequence
+        E-->>C: ApplyError (SEQUENCE_GAP / DUPLICATE_SEQUENCE): nothing emitted, nothing changed
+    else n is next
+        E->>B: addOrder / cancelOrder(id, participant) / modifyOrder / halt / resume
+        B-->>E: Fill callbacks (while matching), then the result
+        E->>K: FILL events (execution order), output sequences m, m+1, ...
+        E->>K: one summary: ACCEPTED / MODIFIED / CANCELLED / REJECTED / HALTED / RESUMED
+    end
+```
+
+| Type | Size | Role |
+|---|---|---|
+| `Command` | 64 bytes | one input; tagged record, unused fields zero; the journal payload (B3.2) |
+| `SequencedCommand` | 80 bytes | command + sequence number + sequencer time |
+| `OutputEvent` | 96 bytes | one output; gap-free output sequence, input sequence, input time |
+
+All three are trivially copyable, fixed-layout and free of padding bytes (static-asserted), so
+streams of them compare byte for byte: the same log gives a byte-identical output stream on every
+run and every book type (NFR-24).
 
 ### Principles
 

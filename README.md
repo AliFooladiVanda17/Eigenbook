@@ -69,6 +69,11 @@ owned by a single thread so that matching needs no locks.
   (`halt()`) rejects adds and modifies and still accepts cancels.
 - **Priority owned by the book:** resting orders are stamped with the book's own priority
   sequence; caller timestamps never decide priority.
+- **Sequenced, deterministic engine core:** a `Sequencer` gives every input (`Command`) a
+  gap-free number and a non-decreasing timestamp, the only clock the engine sees; `Engine<Book>`
+  applies exactly the next input and reports fills and one summary event per input in a
+  gap-free output stream. The same input log gives a byte-identical output stream on every run
+  and every book type. Journal, state hash and snapshots follow (Phase B3).
 - **No allocation in the sweep:** fills are reported through a callback; resting orders come from
   a pre-reserved object pool.
 - **One cache line per order:** each `Order` node is exactly 64 bytes (`static_assert`).
@@ -312,9 +317,10 @@ ctest --preset dev-debug          # or msvc-debug, asan-ubsan, msvc-asan, ...
 | [tests/unit/index_instrumentation_test.cpp](tests/unit/index_instrumentation_test.cpp) | Separate binary built with `EIGENBOOK_INSTRUMENT_INDEX`: index probe statistics |
 | [tests/package_consumer/](tests/package_consumer/) | CTest `package_consumer`: installs the build and builds a separate project against it with `find_package(Eigenbook)` |
 | [tests/unit/trace_format_test.cpp](tests/unit/trace_format_test.cpp) | The NDJSON trace format, the JSON reader and the JSON-to-TLA+ mapping |
+| [tests/unit/engine_test.cpp](tests/unit/engine_test.cpp) | Sequencer, commands, engine events, gap refusal, byte-identical output across runs and book types |
 | [tests/trace/](tests/trace/) | Trace recorder, `eigenbook_trace_gen`, `eigenbook_trace_to_tla` (trace validation tools) |
 
-`ctest` runs 468 GoogleTest cases in three executables plus the `package_consumer` test, and,
+`ctest` runs 481 GoogleTest cases in three executables plus the `package_consumer` test, and,
 when `EIGENBOOK_TLA_TOOLS_JAR` is set, `formal_trace_validation` (label `formal`). Each test is
 mapped to a requirement in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md).
 
@@ -365,6 +371,7 @@ Eigenbook/
 │   │   ├── ladder/           map_ladder.hpp, dense_ladder.hpp, hybrid_ladder.hpp
 │   │   └── locator/          order_locator.hpp (concept), hash_order_index.hpp,
 │   │                         hardened_hash_index.hpp, direct_order_table.hpp
+│   ├── engine/               command.hpp, sequencer.hpp, output_event.hpp, engine.hpp
 │   ├── util/                 level_bitmap.hpp, object_pool.hpp, fixed_block_resource.hpp
 │   └── platform/             tsc.hpp, cpu_info.hpp, affinity.hpp, system_info.hpp
 ├── src/                      Library targets; platform/ (portable, windows/, linux/)
@@ -411,7 +418,8 @@ Detailed plans live in [docs/plans/](docs/plans/).
       invariant checker and halt (B1; the hot-path cost is not measured yet)
 - [x] Formal model of matching (TLA+), model-checked (B2.1), and trace validation of every book
       type against it (B2.2)
-- [ ] Sequencer, journal, snapshots, deterministic replay
+- [ ] Sequencer, journal, snapshots, deterministic replay: sequencer and deterministic engine core
+      done (B3.1); journal, state hash, snapshots and recovery open
 - [ ] Trading phases, auctions, price protection, self-trade prevention, risk gate
 - [ ] Market-data and order-entry sessions, thread-per-shard engine, primary/backup
 - [ ] Deterministic simulation testing, CI, fuzzing

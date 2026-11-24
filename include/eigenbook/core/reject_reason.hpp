@@ -21,6 +21,8 @@ enum class RejectReason : std::uint8_t {
     POST_ONLY_WOULD_TRADE, // a post-only order (or its re-entry) would take liquidity
     INVALID_QUALIFIERS,    // time in force, post-only and minimum quantity do not fit together
     INSTRUMENT_HALTED,     // the book is halted: no new orders or modifies (cancels still work)
+    UNKNOWN_INSTRUMENT,    // engine: no book is registered for the command's instrument
+    INVALID_COMMAND,       // engine: the command type is not a known one
 };
 
 } // namespace eigenbook

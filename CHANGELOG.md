@@ -10,6 +10,13 @@ no release yet; the CMake project version is 0.1.0.
 
 ### Added
 
+- Sequencer and deterministic engine core (Phase B3.1): `Command` / `SequencedCommand` (fixed
+  layout, no padding), `Sequencer<Clock>` with `ManualClock` and `SteadyClock` (gap-free
+  numbers, non-decreasing time), `Engine<Book>` (one book per instrument, applies only the next
+  input, refuses gaps and repeats without output) and `OutputEvent` (fills, then one summary
+  event per input, gap-free output sequence). Reject reasons `UNKNOWN_INSTRUMENT`,
+  `INVALID_COMMAND`. The same input log gives a byte-identical output stream on every run and
+  every book type. Plan `docs/plans/PHASE-B3.md`, ADR 0007, requirements FR-60 to FR-64, NFR-24.
 - Trace validation of the C++ book against the TLA+ specification (Phase B2.2): a trace recorder
   outside the book (`tests/trace/trace_recorder.hpp`, NDJSON in model terms), the seeded
   generator `eigenbook_trace_gen` (every book type, coverage counters), the converter

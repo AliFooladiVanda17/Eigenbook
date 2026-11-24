@@ -22,6 +22,7 @@ add_executable(eigenbook_tests
         unit/time_in_force_test.cpp
         unit/invariants_test.cpp
         unit/trace_format_test.cpp
+        unit/engine_test.cpp
         differential/differential_test.cpp
 )
 

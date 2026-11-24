@@ -28,6 +28,10 @@ target_sources(eigenbook_book
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/locator/hardened_hash_index.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/locator/direct_order_table.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/book/order_book.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/engine/command.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/engine/output_event.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/engine/sequencer.hpp
+        ${PROJECT_SOURCE_DIR}/include/eigenbook/engine/engine.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/util/level_bitmap.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/util/object_pool.hpp
         ${PROJECT_SOURCE_DIR}/include/eigenbook/util/fixed_block_resource.hpp
